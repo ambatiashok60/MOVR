@@ -17,6 +17,7 @@ from app.agents.candidate_test_ranking_agent import CandidateTestRankingAgent
 from app.agents.test_action_decision_agent import TestActionDecisionAgent
 from app.llm.llm_client import LLMClient
 from app.schemas.behavioral_test_unit import BehavioralTestUnit
+from app.schemas.playwright_ui_context import PlaywrightUiContext
 from app.schemas.spec_placement import SpecPlacementDecision
 from app.schemas.test_action_decision import TestActionDecision
 
@@ -31,11 +32,12 @@ class TestActionService:
         self,
         placement: SpecPlacementDecision,
         candidates: list[BehavioralTestUnit],
+        ui_context: PlaywrightUiContext | None = None,
     ) -> TestActionDecision:
         log_step("test_action_service_started", {"target_spec_file": placement.target_spec_file})
         try:
             ranked = self.ranking_agent.rank(candidates)
-            return self.decision_agent.decide(placement, ranked)
+            return self.decision_agent.decide(placement, ranked, ui_context)
         except Exception as exc:
             log_exception(exc, context={"stage": "test_action"})
             raise

@@ -18,6 +18,19 @@ from app.tools.playwright_parser_tool import PlaywrightParserTool
 
 
 class PlaywrightValidator:
+    SPEC_SUFFIXES = (
+        ".spec.ts",
+        ".spec.tsx",
+        ".e2e.ts",
+        ".e2e.tsx",
+        ".test.ts",
+        ".test.tsx",
+        ".pw.ts",
+        ".pw.tsx",
+        ".playwright.ts",
+        ".playwright.tsx",
+    )
+
     def __init__(self) -> None:
         self.parser = PlaywrightParserTool()
 
@@ -44,7 +57,7 @@ class PlaywrightValidator:
                 return ValidationCheck(
                     name="playwright_discovery",
                     passed=False,
-                    output="No TypeScript Playwright spec files discovered.",
+                    output="No TypeScript/TSX Playwright spec files discovered.",
                 )
             if duplicate_messages:
                 return ValidationCheck(
@@ -65,10 +78,10 @@ class PlaywrightValidator:
 
     def _find_spec_files(self, root: Path) -> list[Path]:
         spec_files: list[Path] = []
-        for path in root.rglob("*.ts"):
+        for path in root.rglob("*"):
             if not path.is_file() or self._is_ignored_path(path):
                 continue
-            if path.name.endswith((".spec.ts", ".e2e.ts")) and self._looks_like_playwright(path):
+            if path.name.endswith(self.SPEC_SUFFIXES) and self._looks_like_playwright(path):
                 spec_files.append(path)
         return spec_files
 

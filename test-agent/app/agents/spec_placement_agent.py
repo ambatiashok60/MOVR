@@ -4,6 +4,7 @@ from app.agents.base_agent import BaseAgent, log_exception, log_performance, log
 from app.prompts.spec_placement_prompt import build_spec_placement_prompt
 from app.schemas.decision_trace import DecisionTrace
 from app.schemas.functional_intent import FunctionalIntent
+from app.schemas.playwright_ui_context import PlaywrightUiContext
 from app.schemas.repository_inventory import RepositoryInventory
 from app.schemas.spec_placement import SpecPlacementDecision
 
@@ -16,11 +17,16 @@ class SpecPlacementAgent(BaseAgent):
         self,
         inventory: RepositoryInventory,
         intent: FunctionalIntent | None = None,
+        ui_context: PlaywrightUiContext | None = None,
     ) -> SpecPlacementDecision:
         context = self.log_start("spec_placement")
         try:
             decision = self.complete_structured(
-                prompt=build_spec_placement_prompt(inventory=inventory, intent=intent),
+                prompt=build_spec_placement_prompt(
+                    inventory=inventory,
+                    intent=intent,
+                    ui_context=ui_context,
+                ),
                 response_model=SpecPlacementDecision,
             )
             self.log_decision(

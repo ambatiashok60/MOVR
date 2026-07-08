@@ -1,0 +1,61 @@
+.review-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  height: 100%;
+
+  &__header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 600;
+  }
+
+  &__kept {
+    color: var(--green-500, #22c55e);
+    font-size: 0.85rem;
+    font-weight: 400;
+  }
+
+  &__rejected {
+    color: var(--red-500, #ef4444);
+    font-size: 0.85rem;
+    font-weight: 400;
+  }
+
+  &__files {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--surface-border, #e5e7eb);
+    border-radius: 6px;
+  }
+
+  &__footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--surface-border, #e5e7eb);
+    font-size: 0.85rem;
+
+    small {
+      display: block;
+      color: var(--text-color-secondary, #94a3b8);
+    }
+  }
+
+  &__empty {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    color: var(--text-color-secondary, #94a3b8);
+
+    i {
+      font-size: 2rem;
+    }
+  }
+}

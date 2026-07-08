@@ -13,6 +13,7 @@ from worktop.core_services.app.utility.custom_logger.logging import (
     logger,
 )
 
+from app.agents.critic_agent import CriticAgent
 from app.agents.functional_intent_agent import FunctionalIntentAgent
 from app.agents.locator_reasoning_agent import LocatorReasoningAgent
 from app.errors import UnsupportedRepositoryError
@@ -26,6 +27,7 @@ from app.services.code_generation_service import CodeGenerationService
 from app.services.flow_merge_service import FlowMergeService
 from app.services.inventory_service import InventoryService
 from app.services.ownership_resolution_service import OwnershipResolutionService
+from app.services.playwright_ui_intelligence_service import PlaywrightUiIntelligenceService
 from app.services.repo_strategy_service import RepoStrategyService
 from app.services.result_builder_service import ResultBuilderService
 from app.services.source_intelligence_service import SourceIntelligenceService
@@ -44,6 +46,7 @@ class GenerationOrchestrator:
         self.classifier = TestFileClassifierService()
         self.inventory = InventoryService()
         self.behavioral_inventory = BehavioralInventoryService()
+        self.ui_intelligence = PlaywrightUiIntelligenceService()
         self.flow_merge = FlowMergeService()
         self.patch_writer = ScopedPatchWriter()
         self.validator = RepoCommandValidator()
@@ -67,21 +70,28 @@ class GenerationOrchestrator:
             ownership = OwnershipResolutionService(llm_client=runtime.llm_client)
             locators = LocatorReasoningAgent(llm_client=runtime.llm_client)
             code_generation = CodeGenerationService(llm_client=runtime.llm_client)
+            critic = CriticAgent(llm_client=runtime.llm_client)
 
             self.technology.detect(repo_profile)
             classifications = self.classifier.classify(request.repo_path)
             inventory = self.inventory.build(request.repo_path, classifications)
+            ui_context = self.ui_intelligence.build(request.repo_path, inventory, repo_profile)
             intent = functional_intent.extract(request)
-            source = source_intelligence.map(intent)
+            source = source_intelligence.map(intent, ui_context)
             behavior = self.behavioral_inventory.extract(inventory)
-            placement = spec_placement.decide(inventory, intent)
-            action = test_action.decide(placement, behavior)
+            placement = spec_placement.decide(inventory, intent, ui_context)
+            action = test_action.decide(placement, behavior, ui_context)
             flow_merge.plan(intent)
             ownership.resolve(inventory)
             locators.decide(source)
-            patches = code_generation.generate(placement, action)
+            patches = code_generation.generate(placement, action, ui_context)
+            patches = critic.review(patches, ui_context)
             patch_result = self.patch_writer.apply(request.repo_path, patches)
-            validation = self.validator.validate(request.repo_path) if request.run_validation else None
+            validation = (
+                self.validator.validate(request.repo_path, patches, ui_context)
+                if request.run_validation
+                else None
+            )
             decision_trace = [
                 trace
                 for trace in (

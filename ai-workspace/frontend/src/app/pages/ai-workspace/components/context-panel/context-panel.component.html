@@ -1,0 +1,12 @@
+<div class="context-panel">
+  <span>
+    Context
+    @if (context) {
+      ({{ context.fileCount }} files)
+    }
+  </span>
+  @if (context) {
+    <span class="context-panel__tokens">{{ context.tokenCount }} tokens</span>
+  }
+  <p-button label="Manage" [text]="true" size="small" (onClick)="manage.emit()" />
+</div>

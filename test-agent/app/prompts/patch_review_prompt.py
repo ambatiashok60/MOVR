@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.prompts.prompt_sections import as_json, response_contract
 from app.schemas.code_patch import PatchSet
+from app.schemas.playwright_ui_context import PlaywrightUiContext
 from app.schemas.validation_result import ValidationResult
 
 
@@ -24,17 +25,27 @@ Validation result:
 """
 
 
-def build_critic_prompt(patches: PatchSet) -> str:
+def build_critic_prompt(
+    patches: PatchSet,
+    ui_context: PlaywrightUiContext | None = None,
+) -> str:
     return f"""
-You are reviewing generated Playwright patches for beta quality.
+You are reviewing generated Playwright UI patches for CI quality.
 
 Rules:
 - Keep only safe, scoped, maintainable patch intent.
 - Preserve structured patch format.
 - Do not add provider-specific SDK usage.
+- Reject shallow assertions that do not prove user-visible behavior.
+- Reject fixed sleeps, arbitrary timeout waits, and invented selectors.
+- Ensure mocks/stubs, auth/session setup, fixtures, and page objects follow existing repo patterns when present.
+- Ensure generated tests are deterministic, parallel-safe, and useful in CI reports.
 
 Patches:
 {as_json(patches)}
+
+Playwright UI context:
+{as_json(ui_context or {})}
 
 {response_contract("PatchSet")}
 """

@@ -16,6 +16,7 @@ from worktop.core_services.app.utility.custom_logger.logging import (
 from app.agents.code_generation_agent import CodeGenerationAgent
 from app.llm.llm_client import LLMClient
 from app.schemas.code_patch import PatchSet
+from app.schemas.playwright_ui_context import PlaywrightUiContext
 from app.schemas.spec_placement import SpecPlacementDecision
 from app.schemas.test_action_decision import TestActionDecision
 
@@ -29,10 +30,11 @@ class CodeGenerationService:
         self,
         placement: SpecPlacementDecision,
         action: TestActionDecision,
+        ui_context: PlaywrightUiContext | None = None,
     ) -> PatchSet:
         log_step("code_generation_service_started", {"action": action.action})
         try:
-            patches = self.agent.generate(placement, action)
+            patches = self.agent.generate(placement, action, ui_context)
             log_metric("generated_patch_count", len(patches.patches))
             return patches
         except Exception as exc:

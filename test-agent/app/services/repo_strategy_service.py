@@ -139,10 +139,21 @@ class RepoStrategyService:
         ]
 
     def _find_playwright_spec_files(self, root: Path) -> list[str]:
-        spec_suffixes = (".spec.ts", ".e2e.ts")
+        spec_suffixes = (
+            ".spec.ts",
+            ".spec.tsx",
+            ".e2e.ts",
+            ".e2e.tsx",
+            ".test.ts",
+            ".test.tsx",
+            ".pw.ts",
+            ".pw.tsx",
+            ".playwright.ts",
+            ".playwright.tsx",
+        )
         return [
             str(path.relative_to(root))
-            for path in root.rglob("*.ts")
+            for path in root.rglob("*")
             if path.is_file()
             and path.name.endswith(spec_suffixes)
             and not self._is_ignored_path(path)

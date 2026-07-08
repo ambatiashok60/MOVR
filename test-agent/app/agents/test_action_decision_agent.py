@@ -4,6 +4,7 @@ from app.agents.base_agent import BaseAgent, log_exception, log_performance
 from app.prompts.test_action_prompt import build_test_action_prompt
 from app.schemas.decision_trace import DecisionTrace
 from app.schemas.behavioral_test_unit import BehavioralTestUnit
+from app.schemas.playwright_ui_context import PlaywrightUiContext
 from app.schemas.spec_placement import SpecPlacementDecision
 from app.schemas.test_action_decision import TestActionDecision
 
@@ -16,11 +17,12 @@ class TestActionDecisionAgent(BaseAgent):
         self,
         placement: SpecPlacementDecision,
         ranked_tests: list[BehavioralTestUnit],
+        ui_context: PlaywrightUiContext | None = None,
     ) -> TestActionDecision:
         context = self.log_start("test_action")
         try:
             return self.complete_structured(
-                prompt=build_test_action_prompt(placement, ranked_tests),
+                prompt=build_test_action_prompt(placement, ranked_tests, ui_context),
                 response_model=TestActionDecision,
             )
         except Exception as exc:

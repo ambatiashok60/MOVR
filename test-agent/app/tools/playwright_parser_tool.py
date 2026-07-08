@@ -44,6 +44,7 @@ class PlaywrightParserTool:
                     start_line=start_line,
                     end_line=end_line,
                 )
+                block = content[match.start() : max(end_offset, match.end())]
                 units.append(
                     BehavioralTestUnit(
                         file_path=file_path,
@@ -51,6 +52,9 @@ class PlaywrightParserTool:
                         test_title=self._clean_title(match.group("title")),
                         start_line=start_line,
                         end_line=end_line,
+                        fixtures=self._extract_fixtures(block),
+                        page_objects=self._extract_page_objects(block),
+                        behavior_summary=self._summarize_behavior(block),
                     )
                 )
             log_metric("playwright_test_count", len(units))
@@ -171,3 +175,40 @@ class PlaywrightParserTool:
 
     def _clean_title(self, title: str) -> str:
         return " ".join(title.split())
+
+    def _extract_fixtures(self, block: str) -> list[str]:
+        fixtures: set[str] = set()
+        fixture_match = re.search(r"async\s*\(\s*\{(?P<fixtures>[^}]+)\}", block)
+        if fixture_match:
+            fixtures.update(
+                item.strip().split(":")[0].strip()
+                for item in fixture_match.group("fixtures").split(",")
+                if item.strip()
+            )
+        if "storageState" in block:
+            fixtures.add("storageState")
+        if "test.use" in block:
+            fixtures.add("test.use")
+        return sorted(fixtures)
+
+    def _extract_page_objects(self, block: str) -> list[str]:
+        page_objects = {
+            match.group("name")
+            for match in re.finditer(r"\bnew\s+(?P<name>[A-Z][A-Za-z0-9]*Page)\b", block)
+        }
+        return sorted(page_objects)
+
+    def _summarize_behavior(self, block: str) -> str:
+        actions: list[str] = []
+        for token, label in (
+            (".goto(", "navigates"),
+            (".click(", "clicks"),
+            (".fill(", "fills input"),
+            (".selectOption(", "selects option"),
+            ("page.route", "stubs network"),
+            ("route.fulfill", "fulfills network response"),
+            ("expect(", "asserts outcome"),
+        ):
+            if token in block:
+                actions.append(label)
+        return ", ".join(actions)

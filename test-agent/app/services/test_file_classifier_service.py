@@ -18,6 +18,19 @@ from app.schemas.test_file_classification import TestFileClassification
 
 
 class TestFileClassifierService:
+    SPEC_SUFFIXES = (
+        ".spec.ts",
+        ".spec.tsx",
+        ".e2e.ts",
+        ".e2e.tsx",
+        ".test.ts",
+        ".test.tsx",
+        ".pw.ts",
+        ".pw.tsx",
+        ".playwright.ts",
+        ".playwright.tsx",
+    )
+
     @log_performance("test_file_classifier_service.classify")
     def classify(self, repo_path: str) -> list[TestFileClassification]:
         log_step("test_file_classification_started", {"repo_path": repo_path})
@@ -46,7 +59,7 @@ class TestFileClassifierService:
             raise
 
     def _classify_file(self, path: Path) -> tuple[str, bool, str]:
-        if not path.name.endswith((".spec.ts", ".e2e.ts")):
+        if not path.name.endswith(self.SPEC_SUFFIXES):
             return "source", False, "Not a spec filename"
         content = path.read_text(encoding="utf-8", errors="ignore")
         lower_content = content.lower()

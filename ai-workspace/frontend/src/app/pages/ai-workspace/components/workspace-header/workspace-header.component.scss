@@ -1,0 +1,22 @@
+.workspace-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+
+  &__title {
+    font-size: 1.1rem;
+    margin: 0;
+  }
+
+  &__mode,
+  &__model {
+    font-size: 0.8rem;
+    color: var(--text-color-secondary, #64748b);
+  }
+
+  &__sync {
+    font-size: 0.8rem;
+    color: var(--green-500, #22c55e);
+    margin-left: auto;
+  }
+}
