@@ -1,0 +1,32 @@
+<section class="test-generation-shell">
+  <header class="page-header">
+    <div>
+      <h1>Test Generation</h1>
+      <p>Generate functional and API test coverage from sprint stories.</p>
+    </div>
+  </header>
+
+  <nav class="tab-strip" aria-label="Test generation mode">
+    <button
+      type="button"
+      [class.active]="activeTab === 'functional'"
+      (click)="setTab('functional')"
+    >
+      Functional Test Generation
+    </button>
+    <button
+      type="button"
+      [class.active]="activeTab === 'api'"
+      (click)="setTab('api')"
+    >
+      API Test Generation
+    </button>
+  </nav>
+
+  <app-functional-test-gen *ngIf="activeTab === 'functional'"></app-functional-test-gen>
+  <app-api-test-gen
+    *ngIf="activeTab === 'api'"
+    [stories]="stories"
+    [tenantId]="tenantId"
+  ></app-api-test-gen>
+</section>

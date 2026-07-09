@@ -1,0 +1,21 @@
+[project]
+name = "api-agent-service"
+version = "0.1.0"
+description = "Repository-aware API test generation agent service"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.111.0",
+  "pydantic>=2.7.0",
+  "pydantic-settings>=2.2.1",
+  "uvicorn>=0.30.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.2.0", "ruff>=0.5.0"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

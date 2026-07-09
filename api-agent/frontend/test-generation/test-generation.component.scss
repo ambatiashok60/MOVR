@@ -1,0 +1,50 @@
+.test-generation-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 100%;
+  padding: 20px;
+  color: #172033;
+  background: #f7f8fb;
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.page-header h1 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 650;
+}
+
+.page-header p {
+  margin: 4px 0 0;
+  color: #61708a;
+  font-size: 14px;
+}
+
+.tab-strip {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid #d9dee8;
+}
+
+.tab-strip button {
+  appearance: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  padding: 10px 14px;
+  color: #50607a;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tab-strip button.active {
+  color: #164fa3;
+  border-bottom-color: #2563eb;
+}
