@@ -1,15 +1,12 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
-
-from worktop.core_services.app.utility.custom_logger.log_helpers import (
-    log_exception,
-    log_step,
-)
-from worktop.core_services.app.utility.custom_logger.logging import logger
 
 from app.llm.default_llm_client import DefaultLLMClientAdapter
 from app.llm.llm_client import LLMClient
+
+logger = logging.getLogger(__name__)
 
 
 class LLMClientFactory:
@@ -20,11 +17,23 @@ class LLMClientFactory:
                 "agentic Playwright generation process."
             )
 
-        log_step("llm_client_factory_started", {"tenant_id": tenant_id, "stage": "llm"})
+        logger.info(
+            "[playwright-generation] stage=llm_client_factory status=started tenant_id=%s",
+            tenant_id,
+        )
         try:
-            return DefaultLLMClientAdapter(db=db, tenant_id=tenant_id)
+            client = DefaultLLMClientAdapter(db=db, tenant_id=tenant_id)
+            logger.info(
+                "[playwright-generation] stage=llm_client_factory status=completed tenant_id=%s",
+                tenant_id,
+            )
+            return client
         except Exception as exc:
-            log_exception(exc, context={"tenant_id": tenant_id, "stage": "llm_client_factory"})
+            logger.exception(
+                "[playwright-generation] stage=llm_client_factory status=failed tenant_id=%s error=%s",
+                tenant_id,
+                exc,
+            )
             raise RuntimeError(
                 "Unable to create the real LLM client for the agentic Playwright "
                 "generation process."

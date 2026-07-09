@@ -1,24 +1,15 @@
 from __future__ import annotations
 
+import logging
 import subprocess
-from typing import Any
 
-from worktop.core_services.app.utility.custom_logger.log_helpers import (
-    log_card_simple,
-    log_exception,
-    log_metric,
-    log_step,
-)
-from worktop.core_services.app.utility.custom_logger.logging import (
-    log_performance,
-    logger,
-)
+
+logger = logging.getLogger(__name__)
 
 
 class GitTool:
-    @log_performance("git_tool.head")
     def head(self, repo_path: str) -> str | None:
-        log_step("git_head_started", {"repo_path": repo_path, "stage": "git"})
+        logger.info("[playwright-generation] stage=git_head status=started repo=%s", repo_path)
         try:
             result = subprocess.run(
                 ["git", "-C", repo_path, "rev-parse", "HEAD"],
@@ -26,12 +17,17 @@ class GitTool:
                 capture_output=True,
                 text=True,
             )
-            return result.stdout.strip() or None
+            head = result.stdout.strip() or None
+            logger.info("[playwright-generation] stage=git_head status=completed head=%s", head)
+            return head
         except Exception as exc:
-            log_exception(exc, context={"repo_path": repo_path, "stage": "git"})
+            logger.exception(
+                "[playwright-generation] stage=git_head status=failed repo=%s error=%s",
+                repo_path,
+                exc,
+            )
             raise
 
-    @log_performance("git_tool.diff")
     def diff(self, repo_path: str) -> str:
         result = subprocess.run(
             ["git", "-C", repo_path, "diff", "--"],

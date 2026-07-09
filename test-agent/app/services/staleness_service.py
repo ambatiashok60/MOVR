@@ -1,27 +1,22 @@
 from __future__ import annotations
 
-from typing import Any
+import logging
 
-from worktop.core_services.app.utility.custom_logger.log_helpers import (
-    log_card_simple,
-    log_exception,
-    log_metric,
-    log_step,
-)
-from worktop.core_services.app.utility.custom_logger.logging import (
-    log_performance,
-    logger,
-)
+
+logger = logging.getLogger(__name__)
 
 
 class StalenessService:
-    @log_performance("staleness_service.is_stale")
     def is_stale(self, repo_head: str | None, cached_head: str | None) -> bool:
-        log_step("staleness_check_started", {"repo_head": repo_head})
+        logger.info(
+            "[playwright-generation] stage=staleness status=started repo_head=%s cached_head=%s",
+            repo_head,
+            cached_head,
+        )
         try:
             stale = repo_head != cached_head
-            logger.info("Inventory staleness checked")
+            logger.info("[playwright-generation] stage=staleness status=completed stale=%s", stale)
             return stale
         except Exception as exc:
-            log_exception(exc, context={"stage": "staleness"})
+            logger.exception("[playwright-generation] stage=staleness status=failed error=%s", exc)
             raise

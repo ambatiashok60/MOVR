@@ -3,6 +3,7 @@ from __future__ import annotations
 from app.prompts.prompt_sections import as_json, response_contract
 from app.schemas.functional_intent import FunctionalIntent
 from app.schemas.playwright_ui_context import PlaywrightUiContext
+from app.schemas.source_intelligence import SourceIntelligence
 
 
 def build_source_mapping_prompt(
@@ -24,5 +25,5 @@ Functional intent:
 Playwright UI context:
 {as_json(ui_context or {})}
 
-{response_contract("SourceIntelligence")}
+{response_contract(SourceIntelligence)}
 """

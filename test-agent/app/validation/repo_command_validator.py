@@ -1,15 +1,7 @@
 from __future__ import annotations
 
-from worktop.core_services.app.utility.custom_logger.log_helpers import (
-    log_card_simple,
-    log_exception,
-    log_metric,
-    log_step,
-)
-from worktop.core_services.app.utility.custom_logger.logging import (
-    log_performance,
-    logger,
-)
+import logging
+
 
 from app.schemas.code_patch import PatchSet
 from app.schemas.playwright_ui_context import PlaywrightUiContext
@@ -17,6 +9,8 @@ from app.schemas.validation_result import ValidationCheck, ValidationResult
 from app.validation.playwright_validator import PlaywrightValidator
 from app.validation.playwright_ui_quality_validator import PlaywrightUiQualityValidator
 from app.validation.syntax_validator import SyntaxValidator
+
+logger = logging.getLogger(__name__)
 
 
 class RepoCommandValidator:
@@ -38,14 +32,16 @@ class RepoCommandValidator:
         self.playwright = PlaywrightValidator()
         self.ui_quality = PlaywrightUiQualityValidator()
 
-    @log_performance("repo_command_validator.validate")
     def validate(
         self,
         repo_path: str,
         patches: PatchSet | None = None,
         ui_context: PlaywrightUiContext | None = None,
     ) -> ValidationResult:
-        log_step("repo_validation_started", {"repo_path": repo_path})
+        logger.info(
+            "[playwright-generation] stage=repo_validation status=started repo=%s",
+            repo_path,
+        )
         try:
             checks = [
                 self.syntax.validate(repo_path),
@@ -54,11 +50,18 @@ class RepoCommandValidator:
                 self._ci_command_check(patches, ui_context),
             ]
             passed = all(check.passed for check in checks)
-            log_metric("validation_check_count", len(checks))
-            logger.info("Repository validation completed")
+            logger.info(
+                "[playwright-generation] stage=repo_validation status=completed passed=%s checks=%s",
+                passed,
+                len(checks),
+            )
             return ValidationResult(passed=passed, checks=checks)
         except Exception as exc:
-            log_exception(exc, context={"repo_path": repo_path, "stage": "validation"})
+            logger.exception(
+                "[playwright-generation] stage=repo_validation status=failed repo=%s error=%s",
+                repo_path,
+                exc,
+            )
             raise
 
     def _ci_command_check(

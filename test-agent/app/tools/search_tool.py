@@ -1,24 +1,19 @@
 from __future__ import annotations
 
+import logging
 import subprocess
-from typing import Any
 
-from worktop.core_services.app.utility.custom_logger.log_helpers import (
-    log_card_simple,
-    log_exception,
-    log_metric,
-    log_step,
-)
-from worktop.core_services.app.utility.custom_logger.logging import (
-    log_performance,
-    logger,
-)
+
+logger = logging.getLogger(__name__)
 
 
 class SearchTool:
-    @log_performance("search_tool.search")
     def search(self, repo_path: str, pattern: str) -> list[str]:
-        log_step("search_started", {"repo_path": repo_path, "stage": "search"})
+        logger.info(
+            "[playwright-generation] stage=search status=started repo=%s pattern=%s",
+            repo_path,
+            pattern,
+        )
         try:
             result = subprocess.run(
                 ["rg", "--line-number", pattern, repo_path],
@@ -27,8 +22,16 @@ class SearchTool:
                 text=True,
             )
             lines = result.stdout.splitlines()
-            log_metric("search_result_count", len(lines))
+            logger.info(
+                "[playwright-generation] stage=search status=completed results=%s",
+                len(lines),
+            )
             return lines
         except Exception as exc:
-            log_exception(exc, context={"repo_path": repo_path, "stage": "search"})
+            logger.exception(
+                "[playwright-generation] stage=search status=failed repo=%s pattern=%s error=%s",
+                repo_path,
+                pattern,
+                exc,
+            )
             raise

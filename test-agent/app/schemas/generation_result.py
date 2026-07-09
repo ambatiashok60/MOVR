@@ -13,6 +13,8 @@ class GenerationResult(BaseModel):
     diff_summary: str = ""
     diff: str = ""
     confidence: float = 0.0
+    needs_review: bool = False
+    review_reasons: list[str] = Field(default_factory=list)
     repo_profile: RepoProfile | None = None
     decision_trace: list[DecisionTrace] = Field(default_factory=list)
     validation: ValidationResult | None = None

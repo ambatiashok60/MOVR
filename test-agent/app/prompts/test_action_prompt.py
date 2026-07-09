@@ -4,6 +4,7 @@ from app.prompts.prompt_sections import as_json, response_contract
 from app.schemas.behavioral_test_unit import BehavioralTestUnit
 from app.schemas.playwright_ui_context import PlaywrightUiContext
 from app.schemas.spec_placement import SpecPlacementDecision
+from app.schemas.test_action_decision import TestActionDecision
 
 
 def build_test_action_prompt(
@@ -31,5 +32,5 @@ Ranked candidate tests:
 Playwright UI context:
 {as_json(ui_context or {})}
 
-{response_contract("TestActionDecision")}
+{response_contract(TestActionDecision)}
 """

@@ -1,30 +1,28 @@
 from __future__ import annotations
 
-from typing import Any
+import logging
 
-from worktop.core_services.app.utility.custom_logger.log_helpers import (
-    log_card_simple,
-    log_exception,
-    log_metric,
-    log_step,
-)
-from worktop.core_services.app.utility.custom_logger.logging import (
-    log_performance,
-    logger,
-)
 
 from app.schemas.repo_profile import RepoProfile
 from app.schemas.technology_profile import TechnologyProfile
 
+logger = logging.getLogger(__name__)
+
 
 class TechnologyIntelligenceService:
-    @log_performance("technology_intelligence_service.detect")
     def detect(self, repo_profile: RepoProfile) -> TechnologyProfile:
-        log_step("technology_intelligence_started", {"repo_path": repo_profile.repo_path})
+        logger.info(
+            "[playwright-generation] stage=technology_intelligence status=started repo=%s",
+            repo_profile.repo_path,
+        )
         try:
             profile = TechnologyProfile()
-            logger.info("Technology intelligence completed")
+            logger.info("[playwright-generation] stage=technology_intelligence status=completed")
             return profile
         except Exception as exc:
-            log_exception(exc, context={"repo_path": repo_profile.repo_path, "stage": "technology"})
+            logger.exception(
+                "[playwright-generation] stage=technology_intelligence status=failed repo=%s error=%s",
+                repo_profile.repo_path,
+                exc,
+            )
             raise

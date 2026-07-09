@@ -21,7 +21,7 @@ Current patches:
 Validation result:
 {as_json(validation)}
 
-{response_contract("PatchSet")}
+{response_contract(PatchSet)}
 """
 
 
@@ -47,5 +47,5 @@ Patches:
 Playwright UI context:
 {as_json(ui_context or {})}
 
-{response_contract("PatchSet")}
+{response_contract(PatchSet)}
 """

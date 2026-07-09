@@ -1,16 +1,14 @@
 from __future__ import annotations
 
+import logging
 import re
 
-from worktop.core_services.app.utility.custom_logger.log_helpers import (
-    log_metric,
-    log_step,
-)
-from worktop.core_services.app.utility.custom_logger.logging import log_performance
 
 from app.schemas.code_patch import PatchSet
 from app.schemas.playwright_ui_context import PlaywrightUiContext
 from app.schemas.validation_result import ValidationCheck
+
+logger = logging.getLogger(__name__)
 
 
 class PlaywrightUiQualityValidator:
@@ -25,13 +23,12 @@ class PlaywrightUiQualityValidator:
         "networkidle",
     )
 
-    @log_performance("playwright_ui_quality_validator.validate")
     def validate(
         self,
         patches: PatchSet | None,
         ui_context: PlaywrightUiContext | None = None,
     ) -> ValidationCheck:
-        log_step("playwright_ui_quality_validation_started", {})
+        logger.info("[playwright-generation] stage=playwright_ui_quality status=started")
         if patches is None:
             return ValidationCheck(
                 name="playwright_ui_quality",
@@ -52,7 +49,10 @@ class PlaywrightUiQualityValidator:
             self._check_locator_quality(patch.path, content, findings, ui_context)
             self._check_repo_patterns(patch.path, content, findings, ui_context)
 
-        log_metric("playwright_ui_quality_finding_count", len(findings))
+        logger.info(
+            "[playwright-generation] stage=playwright_ui_quality status=completed findings=%s",
+            len(findings),
+        )
         return ValidationCheck(
             name="playwright_ui_quality",
             passed=not findings,

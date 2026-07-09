@@ -11,6 +11,7 @@ class RepoProfile(BaseModel):
     repo_path: str
     branch: str | None = None
     support_status: RepoSupportStatus = "unsupported"
+    requires_bootstrap: bool = False
     support_reasons: list[str] = Field(default_factory=list)
     support_warnings: list[str] = Field(default_factory=list)
     support_blockers: list[str] = Field(default_factory=list)

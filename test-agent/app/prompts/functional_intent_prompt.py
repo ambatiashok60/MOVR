@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.prompts.prompt_sections import as_json, response_contract
+from app.schemas.functional_intent import FunctionalIntent
 from app.schemas.generation_request import GenerationRequest
 
 
@@ -13,5 +14,5 @@ Input request:
 
 Identify the business capability, actor, user journey, state transitions, and assertions.
 
-{response_contract("FunctionalIntent")}
+{response_contract(FunctionalIntent)}
 """

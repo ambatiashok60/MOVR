@@ -4,6 +4,7 @@ from app.prompts.prompt_sections import as_json, response_contract
 from app.schemas.functional_intent import FunctionalIntent
 from app.schemas.playwright_ui_context import PlaywrightUiContext
 from app.schemas.repository_inventory import RepositoryInventory
+from app.schemas.spec_placement import SpecPlacementDecision
 
 
 def build_spec_placement_prompt(
@@ -30,5 +31,5 @@ Repository inventory:
 Playwright UI context:
 {as_json(ui_context or {})}
 
-{response_contract("SpecPlacementDecision")}
+{response_contract(SpecPlacementDecision)}
 """

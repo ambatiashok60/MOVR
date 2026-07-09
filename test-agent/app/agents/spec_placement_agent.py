@@ -1,18 +1,17 @@
 from __future__ import annotations
 
-from app.agents.base_agent import BaseAgent, log_exception, log_performance, logger
+from app.agents.base_agent import BaseAgent, logger
 from app.prompts.spec_placement_prompt import build_spec_placement_prompt
 from app.schemas.decision_trace import DecisionTrace
 from app.schemas.functional_intent import FunctionalIntent
 from app.schemas.playwright_ui_context import PlaywrightUiContext
 from app.schemas.repository_inventory import RepositoryInventory
-from app.schemas.spec_placement import SpecPlacementDecision
+from app.schemas.spec_placement import SpecPlacementDecision, SpecPlacementDecisions
 
 
 class SpecPlacementAgent(BaseAgent):
     agent_name = "spec_placement_agent"
 
-    @log_performance("spec_placement_agent.decide")
     def decide(
         self,
         inventory: RepositoryInventory,
@@ -38,7 +37,12 @@ class SpecPlacementAgent(BaseAgent):
             logger.info("Spec placement decision completed")
             return decision
         except Exception as exc:
-            log_exception(exc, context=context)
+            logger.exception(
+                "[playwright-generation] agent=%s stage=spec_placement status=failed context=%s error=%s",
+                self.agent_name,
+                context,
+                exc,
+            )
             raise
 
     def _fallback_decision(
@@ -56,7 +60,9 @@ class SpecPlacementAgent(BaseAgent):
             create_new=create_new,
             confidence=0.35,
             decision_trace=DecisionTrace(
-                decision="create_new_spec" if create_new else "extend_existing_spec",
+                decision=SpecPlacementDecisions.CREATE_NEW_SPEC
+                if create_new
+                else SpecPlacementDecisions.EXTEND_EXISTING_SPEC,
                 confidence=0.35,
                 justification="Deterministic fallback used because no LLM decision was available.",
                 evidence=["First E2E candidate selected from repository inventory"]

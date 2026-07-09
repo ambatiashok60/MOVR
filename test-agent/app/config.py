@@ -9,6 +9,11 @@ class Settings(BaseSettings):
     workspace_root: str = "/tmp"
     enable_targeted_runtime: bool = False
     validation_timeout_seconds: int = 120
+    max_repair_attempts: int = 1
+    min_placement_confidence: float = 0.5
+    min_action_confidence: float = 0.5
+    min_ownership_confidence: float = 0.5
+    min_flow_merge_confidence: float = 0.5
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

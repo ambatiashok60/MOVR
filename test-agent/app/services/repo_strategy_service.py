@@ -1,29 +1,25 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
-from worktop.core_services.app.utility.custom_logger.log_helpers import (
-    log_card_simple,
-    log_exception,
-    log_metric,
-    log_step,
-)
-from worktop.core_services.app.utility.custom_logger.logging import (
-    log_performance,
-    logger,
-)
 
 from app.schemas.repo_profile import RepoProfile
 from app.utils.logging_utils import build_log_context
 
+logger = logging.getLogger(__name__)
+
 
 class RepoStrategyService:
-    @log_performance("repo_strategy_service.detect")
     def detect(self, repo_path: str, branch: str | None = None) -> RepoProfile:
         context = build_log_context(repo_path=repo_path, branch=branch, stage="repo_strategy")
-        log_step("repo_strategy_started", context)
+        logger.info(
+            "[playwright-generation] stage=repo_strategy status=started repo=%s branch=%s",
+            repo_path,
+            branch,
+        )
         try:
             root = Path(repo_path)
             if not root.exists() or not root.is_dir():
@@ -43,10 +39,26 @@ class RepoStrategyService:
             configs = self._relative_files(root, "playwright.config.*")
             spec_files = self._find_playwright_spec_files(root)
             lockfiles = self._detect_lockfiles(root)
+            logger.debug(
+                "[playwright-generation] stage=repo_strategy status=discovered "
+                "package_json_files=%s configs=%s spec_files=%s lockfiles=%s",
+                [str(path.relative_to(root)) for path in package_json_files],
+                configs,
+                spec_files,
+                lockfiles,
+            )
             package_manager = self._detect_package_manager(lockfiles)
             frameworks = self._detect_frameworks(dependencies, root)
             monorepo_tooling = self._detect_monorepo_tooling(root, dependencies)
             unsupported_signals = self._detect_unsupported_signals(root, dependencies)
+            logger.debug(
+                "[playwright-generation] stage=repo_strategy status=classified "
+                "package_manager=%s frameworks=%s monorepo_tooling=%s unsupported_signals=%s",
+                package_manager,
+                sorted(frameworks),
+                monorepo_tooling,
+                unsupported_signals,
+            )
             is_monorepo = bool(monorepo_tooling) or any(
                 (root / name).exists() for name in ("apps", "packages")
             )
@@ -59,21 +71,24 @@ class RepoStrategyService:
                 package_manager=package_manager,
                 package_scripts=package_scripts,
             )
-            support_status, reasons, warnings, blockers = self._classify_support(
-                configs=configs,
-                spec_files=spec_files,
-                package_json_exists=bool(package_json),
-                frameworks=frameworks,
-                unsupported_signals=unsupported_signals,
-                monorepo_tooling=monorepo_tooling,
-                is_monorepo=is_monorepo,
-                app_roots=app_roots,
-                validation_commands=validation_commands,
+            support_status, requires_bootstrap, reasons, warnings, blockers = (
+                self._classify_support(
+                    configs=configs,
+                    spec_files=spec_files,
+                    package_json_exists=bool(package_json),
+                    frameworks=frameworks,
+                    unsupported_signals=unsupported_signals,
+                    monorepo_tooling=monorepo_tooling,
+                    is_monorepo=is_monorepo,
+                    app_roots=app_roots,
+                    validation_commands=validation_commands,
+                )
             )
             profile = RepoProfile(
                 repo_path=repo_path,
                 branch=branch,
                 support_status=support_status,
+                requires_bootstrap=requires_bootstrap,
                 support_reasons=reasons,
                 support_warnings=warnings,
                 support_blockers=blockers,
@@ -90,10 +105,14 @@ class RepoStrategyService:
                 validation_commands=validation_commands,
             )
             self._log_profile(profile)
-            logger.info("Repository strategy detected")
+            logger.info("[playwright-generation] stage=repo_strategy status=completed")
             return profile
         except Exception as exc:
-            log_exception(exc, context=context)
+            logger.exception(
+                "[playwright-generation] stage=repo_strategy status=failed context=%s error=%s",
+                context,
+                exc,
+            )
             raise
 
     def _find_package_json_files(self, root: Path) -> list[Path]:
@@ -263,10 +282,11 @@ class RepoStrategyService:
         is_monorepo: bool,
         app_roots: list[str],
         validation_commands: list[str],
-    ) -> tuple[str, list[str], list[str], list[str]]:
+    ) -> tuple[str, bool, list[str], list[str], list[str]]:
         reasons: list[str] = []
         warnings: list[str] = []
         blockers: list[str] = []
+        requires_bootstrap = False
 
         if unsupported_signals:
             blockers.append(
@@ -275,10 +295,40 @@ class RepoStrategyService:
             )
         if not package_json_exists:
             blockers.append("No root package.json found")
-        if not configs:
-            blockers.append("No Playwright config found")
-        if not spec_files:
-            blockers.append("No TypeScript Playwright spec files found")
+
+        # A UI repo with no Playwright at all is not a misfit — it is a bootstrap
+        # candidate: the framework (config, dependency, e2e/ convention, first spec)
+        # is scaffolded during generation. Bootstrap requires a recognizable beta
+        # frontend and no competing test framework; otherwise the original blockers
+        # stand.
+        playwright_missing = not configs and not spec_files
+        bootstrap_eligible = (
+            playwright_missing
+            and package_json_exists
+            and not unsupported_signals
+            and any(framework in {"angular", "react"} for framework in frameworks)
+        )
+        if bootstrap_eligible:
+            requires_bootstrap = True
+            warnings.append(
+                "No Playwright framework detected; bootstrap mode will scaffold "
+                "config, dependencies, e2e/ convention, and the first spec"
+            )
+            reasons.append("Beta frontend detected without E2E framework (bootstrap)")
+        else:
+            if not configs and not spec_files:
+                blockers.append("No Playwright config found")
+                blockers.append("No TypeScript Playwright spec files found")
+            elif not configs:
+                warnings.append(
+                    "Playwright specs exist without a Playwright config; targeted "
+                    "execution may need configuration"
+                )
+            elif not spec_files:
+                warnings.append(
+                    "Playwright config exists but no specs yet; the first spec will "
+                    "be created"
+                )
         if not any(framework in {"angular", "react"} for framework in frameworks):
             warnings.append("No Angular or React framework signal detected")
         if not validation_commands:
@@ -306,10 +356,10 @@ class RepoStrategyService:
             reasons.append("Validation scripts detected")
 
         if blockers:
-            return "unsupported", reasons, warnings, blockers
+            return "unsupported", False, reasons, warnings, blockers
         if warnings:
-            return "supported_with_warnings", reasons, warnings, blockers
-        return "supported", reasons, warnings, blockers
+            return "supported_with_warnings", requires_bootstrap, reasons, warnings, blockers
+        return "supported", requires_bootstrap, reasons, warnings, blockers
 
     def _is_ignored_path(self, path: Path) -> bool:
         ignored_parts = {
@@ -325,15 +375,15 @@ class RepoStrategyService:
         return bool(set(path.parts).intersection(ignored_parts))
 
     def _log_profile(self, profile: RepoProfile) -> None:
-        log_metric("playwright_config_count", len(profile.playwright_configs))
-        log_metric("playwright_spec_count", len(profile.playwright_spec_files))
-        log_card_simple(
-            title="Repository Support Decision",
-            message=f"Repository classified as {profile.support_status}",
-            metadata={
-                "status": profile.support_status,
-                "reasons": profile.support_reasons,
-                "warnings": profile.support_warnings,
-                "blockers": profile.support_blockers,
-            },
+        logger.info(
+            "[playwright-generation] stage=repo_strategy support_status=%s "
+            "requires_bootstrap=%s "
+            "playwright_configs=%s playwright_specs=%s reasons=%s warnings=%s blockers=%s",
+            profile.support_status,
+            profile.requires_bootstrap,
+            len(profile.playwright_configs),
+            len(profile.playwright_spec_files),
+            profile.support_reasons,
+            profile.support_warnings,
+            profile.support_blockers,
         )
