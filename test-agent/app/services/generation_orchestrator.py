@@ -15,6 +15,11 @@ from app.agents.repair_agent import RepairAgent
 from app.config import settings
 from app.coverage.coverage_preservation_service import CoveragePreservationService
 from app.errors import UnsupportedRepositoryError
+from app.governance.generation_budget import (
+    BudgetedLLMClient,
+    BudgetExceededError,
+    GenerationBudget,
+)
 from app.patching.scoped_patch_writer import ScopedPatchWriter
 from app.policy.repository_policy_service import RepositoryPolicyService
 from app.schemas.behavioral_test_unit import (
@@ -113,16 +118,18 @@ class GenerationOrchestrator:
                 lambda: GenerationRuntime.from_request(request, db=self.db),
                 started={"action": "creating_llm_client"},
             )
-            functional_intent = FunctionalIntentAgent(llm_client=runtime.llm_client)
-            source_intelligence = SourceIntelligenceService(llm_client=runtime.llm_client)
-            spec_placement = SpecPlacementService(llm_client=runtime.llm_client)
-            test_action = TestActionService(llm_client=runtime.llm_client)
-            flow_merge = FlowMergeService(llm_client=runtime.llm_client)
-            ownership = OwnershipResolutionService(llm_client=runtime.llm_client)
-            locators = LocatorReasoningAgent(llm_client=runtime.llm_client)
-            code_generation = CodeGenerationService(llm_client=runtime.llm_client)
-            critic = CriticAgent(llm_client=runtime.llm_client)
-            repair = RepairAgent(llm_client=runtime.llm_client)
+            budget = GenerationBudget()
+            llm_client = BudgetedLLMClient(runtime.llm_client, budget)
+            functional_intent = FunctionalIntentAgent(llm_client=llm_client)
+            source_intelligence = SourceIntelligenceService(llm_client=llm_client)
+            spec_placement = SpecPlacementService(llm_client=llm_client)
+            test_action = TestActionService(llm_client=llm_client)
+            flow_merge = FlowMergeService(llm_client=llm_client)
+            ownership = OwnershipResolutionService(llm_client=llm_client)
+            locators = LocatorReasoningAgent(llm_client=llm_client)
+            code_generation = CodeGenerationService(llm_client=llm_client)
+            critic = CriticAgent(llm_client=llm_client)
+            repair = RepairAgent(llm_client=llm_client)
 
             self._run_stage(
                 request.job_id,
@@ -344,6 +351,7 @@ class GenerationOrchestrator:
                 critic=critic,
                 repair=repair,
                 policy=repository_policy,
+                budget=budget,
             )
 
             coverage_report = self._assess_coverage_preservation(
@@ -426,6 +434,7 @@ class GenerationOrchestrator:
                     traceability=traceability_matrix,
                     review_report=review_report,
                     manifest=generation_manifest,
+                    budget=budget.report(),
                 ),
                 completed=lambda built: {
                     "files_changed": len(built.files_changed),
@@ -444,6 +453,18 @@ class GenerationOrchestrator:
                 confidence=result.confidence,
             )
             return result
+        except BudgetExceededError as exc:
+            log_event(
+                logger,
+                logging.ERROR,
+                "generation",
+                "escalated",
+                job_id=request.job_id,
+                duration_ms=round((perf_counter() - generation_started_at) * 1000, 2),
+                reason=str(exc),
+                usage=exc.report.usage.model_dump(),
+            )
+            raise
         except Exception as exc:
             log_event(
                 logger,
@@ -640,6 +661,7 @@ class GenerationOrchestrator:
         ownership_resolution: Any | None = None,
         requires_bootstrap: bool = False,
         policy: RepositoryPolicy | None = None,
+        budget: GenerationBudget | None = None,
     ) -> tuple[PatchWriteResult, ValidationResult | None, PatchSet]:
         patch_result = PatchWriteResult()
         max_attempts = max(settings.max_repair_attempts, 0)
@@ -669,6 +691,7 @@ class GenerationOrchestrator:
                 repair=repair,
                 max_attempts=max_attempts,
                 policy=policy,
+                budget=budget,
             )
             if validation is not None and not validation.passed:
                 return patch_result, validation, patches
@@ -684,6 +707,8 @@ class GenerationOrchestrator:
             return patch_result, validation, patches
 
         for attempt in range(1, max_attempts + 1):
+            if budget is not None:
+                budget.charge_repair_attempt()
             log_event(
                 logger,
                 logging.WARNING,
@@ -1679,8 +1704,11 @@ class GenerationOrchestrator:
         ownership_resolution: Any | None = None,
         requires_bootstrap: bool = False,
         policy: RepositoryPolicy | None = None,
+        budget: GenerationBudget | None = None,
     ) -> tuple[PatchSet, ValidationResult | None]:
         for attempt in range(1, max_attempts + 1):
+            if budget is not None:
+                budget.charge_repair_attempt()
             log_event(
                 logger,
                 logging.WARNING,

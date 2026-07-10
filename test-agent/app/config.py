@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     min_action_confidence: float = 0.5
     min_ownership_confidence: float = 0.5
     min_flow_merge_confidence: float = 0.5
+    budget_max_llm_calls: int = 40
+    budget_max_tool_calls: int = 60
+    budget_max_repository_reads: int = 200
+    budget_max_prompt_chars: int = 1_500_000
+    budget_max_generation_seconds: float = 900.0
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

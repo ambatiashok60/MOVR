@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+from app.agents.base_agent import BaseAgent
 from app.coverage.coverage_preservation_service import CoveragePreservationService
+from app.governance.generation_budget import (
+    BudgetedLLMClient,
+    BudgetExceededError,
+    GenerationBudget,
+)
+from app.schemas.exploration import SpecPlacementTurn
+from app.schemas.generation_budget import BudgetLimits
 from app.schemas.behavioral_test_unit import AnchorFlowContext, BehavioralTestUnit
 from app.schemas.code_patch import AppliedPatch, CodePatch, PatchSet, PatchWriteResult
 from app.schemas.decision_trace import DecisionTrace
@@ -637,3 +647,77 @@ class TestGenerationManifest:
 
         assert first.generation_fingerprint == second.generation_fingerprint
         assert first.generation_fingerprint != changed_repo.generation_fingerprint
+
+
+class TestGenerationBudget:
+    def test_llm_calls_beyond_limit_escalate(self) -> None:
+        budget = GenerationBudget(limits=BudgetLimits(max_llm_calls=2))
+
+        budget.charge_llm_call(prompt_chars=100)
+        budget.charge_llm_call(prompt_chars=100)
+        with pytest.raises(BudgetExceededError) as excinfo:
+            budget.charge_llm_call(prompt_chars=100)
+
+        assert "llm_calls used 3 of 2" in str(excinfo.value)
+        assert excinfo.value.report.escalated is True
+        assert excinfo.value.report.usage.llm_calls == 3
+
+    def test_budgeted_client_charges_every_model_and_tool_call(self) -> None:
+        class FakeClient:
+            def complete(self, prompt: str) -> str:
+                return "ok"
+
+            def complete_structured(self, prompt: str, response_model: type) -> object:
+                return object()
+
+        budget = GenerationBudget(limits=BudgetLimits())
+        client = BudgetedLLMClient(FakeClient(), budget)
+
+        client.complete("prompt text")
+        client.complete_structured(prompt="structured prompt", response_model=object)
+        client.charge_tool_call()
+        client.charge_repository_read()
+        report = budget.report()
+
+        assert report.usage.llm_calls == 2
+        assert report.usage.prompt_chars == len("prompt text") + len("structured prompt")
+        assert report.usage.completion_chars == len("ok")
+        assert report.usage.tool_calls == 1
+        assert report.usage.repository_reads == 1
+        assert report.escalated is False
+        assert report.usage.elapsed_seconds >= 0.0
+
+    def test_exploration_loop_charges_repository_reads(self, tmp_path: Path) -> None:
+        budget = GenerationBudget(limits=BudgetLimits(max_repository_reads=1))
+
+        class ScriptedClient:
+            def complete_structured(self, prompt: str, response_model: type):
+                return response_model.model_validate(
+                    {
+                        "reasoning": "need evidence",
+                        "requests": [
+                            {"kind": "read_file", "target": "a.ts", "reason": "check"},
+                            {"kind": "read_file", "target": "b.ts", "reason": "check"},
+                        ],
+                        "output": None,
+                    }
+                )
+
+        agent = BaseAgent(llm_client=BudgetedLLMClient(ScriptedClient(), budget))
+
+        with pytest.raises(BudgetExceededError) as excinfo:
+            agent.complete_with_exploration(
+                "explore", SpecPlacementTurn, repo_path=str(tmp_path), max_turns=3
+            )
+
+        assert "repository_reads" in str(excinfo.value)
+
+    def test_time_budget_escalates(self) -> None:
+        budget = GenerationBudget(
+            limits=BudgetLimits(max_generation_seconds=0.0)
+        )
+
+        with pytest.raises(BudgetExceededError) as excinfo:
+            budget.charge_tool_call()
+
+        assert "elapsed" in str(excinfo.value)

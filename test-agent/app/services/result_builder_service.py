@@ -6,6 +6,7 @@ import logging
 from app.schemas.code_patch import PatchSet, PatchWriteResult
 from app.schemas.coverage import CoveragePreservationReport
 from app.schemas.decision_trace import DecisionTrace
+from app.schemas.generation_budget import BudgetReport
 from app.schemas.generation_manifest import GenerationManifest
 from app.schemas.generation_request import GenerationRequest
 from app.schemas.generation_result import GenerationResult
@@ -34,6 +35,7 @@ class ResultBuilderService:
         traceability: TraceabilityMatrix | None = None,
         review_report: ReviewReport | None = None,
         manifest: GenerationManifest | None = None,
+        budget: BudgetReport | None = None,
     ) -> GenerationResult:
         logger.info(
             "[playwright-generation] job_id=%s stage=result_builder status=started",
@@ -63,6 +65,7 @@ class ResultBuilderService:
                 traceability=traceability,
                 review_report=review_report,
                 manifest=manifest,
+                budget=budget,
             )
         except Exception as exc:
             logger.exception(
