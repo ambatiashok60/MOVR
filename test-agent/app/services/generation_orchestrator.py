@@ -184,7 +184,7 @@ class GenerationOrchestrator:
             action = self._run_stage(
                 request.job_id,
                 "test_action_decision",
-                lambda: test_action.decide(placement, behavior, intent, ui_context),
+                lambda: test_action.decide(placement, behavior, intent, ui_context, request.repo_path),
                 completed=lambda decision: {
                     "action": decision.action,
                     "target_test": decision.target_test_title or "none",
@@ -267,6 +267,7 @@ class GenerationOrchestrator:
                     ownership_resolution,
                     anchor_flow_context,
                     locator_decisions,
+                    request.repo_path,
                 ),
                 completed=lambda patch_set: {
                     "patches": len(patch_set.patches),

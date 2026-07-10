@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import subprocess
+
+from app.config import settings
+
 import logging
 
 
@@ -48,6 +52,7 @@ class RepoCommandValidator:
                 self.playwright.validate(repo_path),
                 self.ui_quality.validate(patches, ui_context),
                 self._ci_command_check(patches, ui_context),
+                self._execution_check(repo_path, patches, ui_context),
             ]
             passed = all(check.passed for check in checks)
             logger.info(
@@ -91,4 +96,51 @@ class RepoCommandValidator:
             name="ci_command_recommendation",
             passed=True,
             output="\n".join(targeted),
+        )
+
+    def _execution_check(
+        self,
+        repo_path: str,
+        patches: PatchSet | None,
+        ui_context: PlaywrightUiContext | None,
+    ) -> ValidationCheck:
+        """Env-gated run-until-green: actually execute the changed specs so the
+        repair loop converges on a passing run, not just static checks."""
+        if not settings.enable_targeted_runtime:
+            return ValidationCheck(
+                name="targeted_execution",
+                passed=True,
+                output="Targeted execution disabled (enable_targeted_runtime=false).",
+            )
+        commands = [c.command for c in (ui_context.ci_commands if ui_context else []) if "playwright" in c.command]
+        changed_specs = [
+            p.path for p in (patches.patches if patches else [])
+            if p.path.endswith((".spec.ts", ".e2e.ts", ".pw.ts", ".playwright.ts"))
+        ]
+        if not commands or not changed_specs:
+            return ValidationCheck(
+                name="targeted_execution",
+                passed=True,
+                output="No Playwright command or changed specs to execute.",
+            )
+        command = f"{commands[0]} {' '.join(changed_specs)}"
+        try:
+            completed = subprocess.run(
+                command, shell=True, cwd=repo_path, capture_output=True,
+                text=True, timeout=settings.validation_timeout_seconds,
+            )
+        except subprocess.TimeoutExpired:
+            return ValidationCheck(
+                name="targeted_execution", passed=False,
+                output=f"{command}\nTimed out after {settings.validation_timeout_seconds}s",
+            )
+        except OSError as exc:
+            return ValidationCheck(
+                name="targeted_execution", passed=False, output=f"{command}\n{exc}"
+            )
+        tail = (completed.stdout + "\n" + completed.stderr)[-6000:]
+        return ValidationCheck(
+            name="targeted_execution",
+            passed=completed.returncode == 0,
+            output=f"{command}\nexit code: {completed.returncode}\n{tail.strip()}",
         )

@@ -10,6 +10,7 @@ from app.schemas.ownership_resolution import OwnershipResolution
 from app.schemas.playwright_ui_context import PlaywrightUiContext
 from app.schemas.spec_placement import SpecPlacementDecision
 from app.schemas.test_action_decision import TestActionDecision
+from app.schemas.exploration import PatchSetTurn
 
 
 class CodeGenerationAgent(BaseAgent):
@@ -25,21 +26,29 @@ class CodeGenerationAgent(BaseAgent):
         ownership: OwnershipResolution | None = None,
         anchor_flow_context: AnchorFlowContext | None = None,
         locator_decisions: list[LocatorDecision] | None = None,
+        repo_path: str | None = None,
     ) -> PatchSet:
         context = self.log_start("code_generation")
         try:
-            return self.complete_structured(
-                prompt=build_code_generation_prompt(
-                    placement,
-                    action,
-                    ui_context,
-                    existing_test_context,
-                    flow_plan,
-                    ownership,
-                    anchor_flow_context,
-                    locator_decisions,
-                ),
-                response_model=PatchSet,
+            prompt = build_code_generation_prompt(
+                placement,
+                action,
+                ui_context,
+                existing_test_context,
+                flow_plan,
+                ownership,
+                anchor_flow_context,
+                locator_decisions,
+                include_contract=False,
+            )
+            prompt += (
+                "\n\nBefore emitting patches, READ every page object, fixture, or "
+                "helper you are about to reference so all imports and member calls "
+                "are real, not guessed. State your reasoning each turn and a reason "
+                "for every file you request."
+            )
+            return self.complete_with_exploration(
+                prompt, PatchSetTurn, repo_path or "."
             )
         except Exception as exc:
             logger.exception(

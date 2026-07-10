@@ -31,6 +31,7 @@ class CodeGenerationService:
         ownership: OwnershipResolution | None = None,
         anchor_flow_context: AnchorFlowContext | None = None,
         locator_decisions: list[LocatorDecision] | None = None,
+        repo_path: str | None = None,
     ) -> PatchSet:
         logger.info(
             "[playwright-generation] stage=code_generation_service status=started "
@@ -51,6 +52,7 @@ class CodeGenerationService:
                 ownership,
                 anchor_flow_context,
                 locator_decisions,
+                repo_path,
             )
             logger.info(
                 "[playwright-generation] stage=code_generation_service status=completed "

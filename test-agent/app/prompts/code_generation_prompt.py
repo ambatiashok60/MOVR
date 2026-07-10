@@ -25,6 +25,7 @@ def build_code_generation_prompt(
     ownership: OwnershipResolution | None = None,
     anchor_flow_context: AnchorFlowContext | None = None,
     locator_decisions: list[LocatorDecision] | None = None,
+    include_contract: bool = True,
 ) -> str:
     best_practices_section = (
         f"\n{playwright_best_practices()}\n" if action.action == "create_new_spec" else ""
@@ -84,5 +85,5 @@ Locator decisions (evidence-grounded, use these exact locators):
 Playwright UI context:
 {as_json(curated_ui_context(ui_context))}
 
-{response_contract(PatchSet)}
+{response_contract(PatchSet) if include_contract else ''}
 """

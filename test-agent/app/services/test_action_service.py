@@ -26,6 +26,7 @@ class TestActionService:
         candidates: list[BehavioralTestUnit],
         intent: FunctionalIntent | None = None,
         ui_context: PlaywrightUiContext | None = None,
+        repo_path: str | None = None,
     ) -> TestActionDecision:
         logger.info(
             "[playwright-generation] stage=test_action status=started target_spec=%s candidates=%s",
@@ -34,7 +35,7 @@ class TestActionService:
         )
         try:
             ranked = self.ranking_agent.rank(candidates, intent)
-            decision = self.decision_agent.decide(placement, ranked, ui_context)
+            decision = self.decision_agent.decide(placement, ranked, ui_context, repo_path)
             logger.info(
                 "[playwright-generation] stage=test_action status=completed action=%s target_test=%s",
                 decision.action,

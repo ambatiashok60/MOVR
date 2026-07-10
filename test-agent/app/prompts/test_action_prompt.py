@@ -16,6 +16,7 @@ def build_test_action_prompt(
     placement: SpecPlacementDecision,
     ranked_tests: list[BehavioralTestUnit],
     ui_context: PlaywrightUiContext | None = None,
+    include_contract: bool = True,
 ) -> str:
     return f"""
 You are deciding whether to extend, append, or create Playwright coverage.
@@ -37,5 +38,5 @@ Ranked candidate tests:
 Playwright UI context:
 {as_json(curated_ui_context(ui_context))}
 
-{response_contract(TestActionDecision)}
+{response_contract(TestActionDecision) if include_contract else ''}
 """

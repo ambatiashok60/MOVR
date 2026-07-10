@@ -16,6 +16,7 @@ def build_spec_placement_prompt(
     inventory: RepositoryInventory,
     intent: FunctionalIntent | None = None,
     ui_context: PlaywrightUiContext | None = None,
+    include_contract: bool = True,
 ) -> str:
     return f"""
 You are deciding where a Playwright E2E spec change belongs.
@@ -36,5 +37,5 @@ Repository inventory:
 Playwright UI context:
 {as_json(curated_ui_context(ui_context))}
 
-{response_contract(SpecPlacementDecision)}
+{response_contract(SpecPlacementDecision) if include_contract else ''}
 """

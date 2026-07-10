@@ -68,3 +68,54 @@ class BaseAgent:
                 exc,
             )
             raise
+
+
+    def complete_with_exploration(
+        self,
+        base_prompt: str,
+        turn_model: type[ResponseModel],
+        repo_path: str,
+        max_turns: int = 4,
+        max_requests_per_turn: int = 4,
+    ) -> ResponseModel:
+        """Agentic tool loop: gather repo evidence, state reasoning, then conclude.
+
+        Each turn the model must explain its reasoning and either request
+        evidence (read_file/search/list_dir, sandboxed) or return the final
+        decision. Every request carries a reason; everything is logged so the
+        decision trail is reconstructable at all levels.
+        """
+        from app.prompts.prompt_sections import response_contract
+        from app.tools.repo_explorer_tool import RepoExplorer
+
+        explorer = RepoExplorer(repo_path)
+        transcript: list[str] = []
+        for turn_index in range(max_turns):
+            final = turn_index == max_turns - 1
+            closing = (
+                "This is your final turn: you MUST return `output` now, with your reasoning."
+                if final
+                else "State `reasoning`, then request evidence via `requests` or return `output`."
+            )
+            evidence = "\n\n".join(transcript[-16:]) or "(none gathered yet)"
+            prompt = (
+                f"{base_prompt}\n\nEvidence gathered from the repository so far:\n"
+                f"{evidence}\n\n{closing}\n\n{response_contract(turn_model)}"
+            )
+            turn = self.complete_structured(prompt, turn_model)
+            logger.info(
+                "[playwright-generation] agent=%s stage=exploration turn=%s concluded=%s "
+                "reasoning=%s requests=%s",
+                self.agent_name,
+                turn_index + 1,
+                turn.output is not None,
+                (turn.reasoning or "unstated")[:400],
+                [f"{r.kind}:{r.target}" for r in turn.requests][:8],
+            )
+            if turn.output is not None:
+                return turn.output
+            if not turn.requests:
+                break
+            for request in turn.requests[:max_requests_per_turn]:
+                transcript.append(explorer.execute(request))
+        raise RuntimeError(f"{self.agent_name} exploration ended without output")

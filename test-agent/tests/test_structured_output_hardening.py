@@ -1535,3 +1535,61 @@ def test_repo_strategy_bootstraps_unrecognized_framework_with_dev_script(tmp_pat
     assert profile.support_status == "supported_with_warnings"
     assert profile.requires_bootstrap is True
     assert not profile.support_blockers
+
+
+def test_spec_placement_agent_explores_before_deciding(tmp_path) -> None:
+    from app.agents.spec_placement_agent import SpecPlacementAgent
+    from app.schemas.repository_inventory import RepositoryInventory
+
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "plans.spec.ts").write_text(
+        "import { test } from '@playwright/test';", encoding="utf-8"
+    )
+
+    class FakeLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def complete_structured(self, prompt, response_model):
+            self.calls += 1
+            if self.calls == 1:
+                return response_model.model_validate({
+                    "reasoning": "Need to confirm tests/plans.spec.ts owns the plan flow.",
+                    "requests": [{"kind": "read_file", "target": "tests/plans.spec.ts",
+                                  "reason": "verify ownership before placing"}],
+                })
+            assert "@playwright/test" in prompt  # evidence fed back
+            return response_model.model_validate({
+                "reasoning": "Confirmed ownership from file content.",
+                "requests": [],
+                "output": {"target_spec_file": "tests/plans.spec.ts",
+                           "create_new": False, "confidence": 0.9},
+            })
+
+    agent = SpecPlacementAgent(llm_client=FakeLLM())
+    decision = agent.decide(
+        RepositoryInventory(repo_path=str(tmp_path), repo_head="abc")
+    )
+    assert agent.llm.calls == 2
+    assert decision.target_spec_file == "tests/plans.spec.ts"
+
+
+def test_targeted_execution_disabled_by_default() -> None:
+    from app.validation.repo_command_validator import RepoCommandValidator
+
+    check = RepoCommandValidator()._execution_check("/tmp/repo", None, None)
+    assert check.passed is True
+    assert "disabled" in check.output
+
+
+def test_targeted_execution_runs_command_when_enabled(tmp_path, monkeypatch) -> None:
+    from app.config import settings as cfg
+    from app.schemas.playwright_ui_context import CiCommandEvidence
+    from app.validation.repo_command_validator import RepoCommandValidator
+
+    monkeypatch.setattr(cfg, "enable_targeted_runtime", True)
+    ui = PlaywrightUiContext(ci_commands=[CiCommandEvidence(command="echo playwright-run &&false")])
+    patches = PatchSet(patches=[CodePatch(path="e2e/x.spec.ts", operation="create", content="x")])
+    ui.ci_commands[0].command = "false # playwright"
+    check = RepoCommandValidator()._execution_check(str(tmp_path), patches, ui)
+    assert check.passed is False  # failing command surfaces as failed validation

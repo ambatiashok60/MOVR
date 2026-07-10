@@ -3,6 +3,7 @@ from __future__ import annotations
 from app.agents.base_agent import BaseAgent, logger
 from app.prompts.test_action_prompt import build_test_action_prompt
 from app.schemas.decision_trace import DecisionTrace
+from app.schemas.exploration import TestActionTurn
 from app.schemas.behavioral_test_unit import BehavioralTestUnit
 from app.schemas.playwright_ui_context import PlaywrightUiContext
 from app.schemas.spec_placement import SpecPlacementDecision
@@ -17,12 +18,21 @@ class TestActionDecisionAgent(BaseAgent):
         placement: SpecPlacementDecision,
         ranked_tests: list[BehavioralTestUnit],
         ui_context: PlaywrightUiContext | None = None,
+        repo_path: str | None = None,
     ) -> TestActionDecision:
         context = self.log_start("test_action")
         try:
-            return self.complete_structured(
-                prompt=build_test_action_prompt(placement, ranked_tests, ui_context),
-                response_model=TestActionDecision,
+            prompt = build_test_action_prompt(
+                placement, ranked_tests, ui_context, include_contract=False
+            )
+            prompt += (
+                "\n\nBefore deciding extend vs append vs create, READ the actual "
+                "candidate test blocks (and the target spec) so the decision is "
+                "based on real coverage, not excerpts. State your reasoning each "
+                "turn and a reason for every file you request."
+            )
+            return self.complete_with_exploration(
+                prompt, TestActionTurn, repo_path or "."
             )
         except Exception as exc:
             logger.exception(

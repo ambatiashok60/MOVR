@@ -581,6 +581,18 @@ how often the repair loop and low-confidence fallbacks fire in the first place:
   justification, or evidence validates structurally but is unreviewable; it now
   adds a `review_reasons` entry (non-blocking).
 
+### Agentic exploration (Claude Code / Codex style, fully self-contained)
+
+Spec placement, extend/append/create, and code generation are no longer static
+one-shot calls: each runs a bounded exploration loop (own `RepoExplorer` +
+`complete_with_exploration`, zero code shared with api-agent). The model must
+state `reasoning` every turn and a `reason` for every file it requests before
+reading candidate specs, actual test blocks, or page objects — all logged, so
+the decision trail is reconstructable at every level. With
+`enable_targeted_runtime=true`, changed specs are actually executed and the
+existing rollback+repair loop converges on a green run (`max_repair_attempts`
+now defaults to 2).
+
 ### Old vs new at a glance
 
 ```text
