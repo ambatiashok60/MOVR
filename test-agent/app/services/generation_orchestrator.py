@@ -40,6 +40,7 @@ from app.services.bootstrap_scaffold_service import BootstrapScaffoldService
 from app.services.code_generation_service import CodeGenerationService
 from app.services.flow_merge_service import FlowMergeService
 from app.services.generation_manifest_service import GenerationManifestService
+from app.services.idempotency_service import IdempotencyService
 from app.services.inventory_service import InventoryService
 from app.services.ownership_resolution_service import OwnershipResolutionService
 from app.services.playwright_ui_intelligence_service import PlaywrightUiIntelligenceService
@@ -82,6 +83,7 @@ class GenerationOrchestrator:
         self.policy = RepositoryPolicyService()
         self.manifest = GenerationManifestService()
         self.workspaces = WorkspaceManager()
+        self.idempotency = IdempotencyService()
 
     def generate(self, request: GenerationRequest) -> GenerationResult:
         context = {"job_id": request.job_id, "repo_path": request.repo_path, "stage": "generation"}
@@ -163,6 +165,25 @@ class GenerationOrchestrator:
                     "page_objects": len(built.page_objects),
                 },
             )
+
+            generation_fingerprint = self.idempotency.fingerprint(request, inventory)
+            existing_record = self._run_optional_stage(
+                request.job_id,
+                "idempotency_check",
+                lambda: self.idempotency.find(generation_fingerprint),
+            )
+            if existing_record is not None:
+                replay = self.idempotency.replay_result(request, existing_record)
+                log_event(
+                    logger,
+                    logging.INFO,
+                    "generation",
+                    "idempotent_replay",
+                    job_id=request.job_id,
+                    original_job=existing_record.job_id,
+                    fingerprint=generation_fingerprint,
+                )
+                return replay
 
             ui_context = self._run_stage(
                 request.job_id,
@@ -452,6 +473,12 @@ class GenerationOrchestrator:
                     "confidence": built.confidence,
                     "needs_review": built.needs_review,
                 },
+            )
+            result.generation_fingerprint = generation_fingerprint
+            self._run_optional_stage(
+                request.job_id,
+                "idempotency_record",
+                lambda: self.idempotency.record(generation_fingerprint, result),
             )
             log_event(
                 logger,

@@ -30,3 +30,6 @@ class GenerationResult(BaseModel):
     review_report: ReviewReport | None = None
     manifest: GenerationManifest | None = None
     budget: BudgetReport | None = None
+    idempotent_replay: bool = False
+    replayed_from_job: str | None = None
+    generation_fingerprint: str = ""

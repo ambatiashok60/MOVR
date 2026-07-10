@@ -24,6 +24,8 @@ from app.schemas.repository_inventory import RepositoryInventory
 from app.schemas.repository_policy import GenerationPolicy, RepositoryPolicy
 from app.schemas.spec_placement import SpecPlacementDecision
 from app.services.generation_manifest_service import GenerationManifestService
+from app.schemas.generation_result import GenerationResult
+from app.services.idempotency_service import IdempotencyService
 from app.schemas.test_action_decision import (
     TestActionDecision as PlaywrightTestActionDecision,
 )
@@ -796,3 +798,72 @@ class TestWorkspaceIsolation:
 
         assert reclaimed.job_id == "job-live"
         manager.release(reclaimed)
+
+
+class TestIdempotency:
+    def _request(self, job_id: str = "job-1") -> GenerationRequest:
+        return GenerationRequest(
+            job_id=job_id,
+            repo_path="/tmp/repo",
+            test_case_name="Employee empty state",
+            steps=["Open employees", "Verify empty state"],
+        )
+
+    def _inventory(self, head: str = "abc123") -> RepositoryInventory:
+        return RepositoryInventory(
+            repo_path="/tmp/repo",
+            repo_head=head,
+            file_hashes={"e2e/employee.spec.ts": "hash-1"},
+        )
+
+    def test_same_story_and_repo_version_produce_same_fingerprint(self, tmp_path: Path) -> None:
+        service = IdempotencyService(registry_root=str(tmp_path))
+
+        first = service.fingerprint(self._request("job-1"), self._inventory())
+        second = service.fingerprint(self._request("job-2"), self._inventory())
+        changed_repo = service.fingerprint(self._request("job-3"), self._inventory("def456"))
+        changed_story = service.fingerprint(
+            GenerationRequest(
+                job_id="job-4",
+                repo_path="/tmp/repo",
+                test_case_name="Different story",
+            ),
+            self._inventory(),
+        )
+
+        assert first == second
+        assert first != changed_repo
+        assert first != changed_story
+
+    def test_duplicate_generate_returns_replay_instead_of_regenerating(
+        self, tmp_path: Path
+    ) -> None:
+        service = IdempotencyService(registry_root=str(tmp_path))
+        fingerprint = service.fingerprint(self._request(), self._inventory())
+        completed = GenerationResult(
+            job_id="job-1",
+            files_changed=["e2e/employee.spec.ts"],
+            diff_summary="1 patch(es) applied",
+        )
+        service.record(fingerprint, completed)
+
+        record = service.find(fingerprint)
+        assert record is not None
+        assert record.job_id == "job-1"
+
+        replay = service.replay_result(self._request("job-2"), record)
+        assert replay.idempotent_replay is True
+        assert replay.replayed_from_job == "job-1"
+        assert replay.files_changed == []
+        assert "Equivalent patch already generated" in replay.diff_summary
+
+    def test_runs_without_applied_patches_are_not_recorded(self, tmp_path: Path) -> None:
+        service = IdempotencyService(registry_root=str(tmp_path))
+        fingerprint = service.fingerprint(self._request(), self._inventory())
+
+        service.record(
+            fingerprint,
+            GenerationResult(job_id="job-1", files_changed=[]),
+        )
+
+        assert service.find(fingerprint) is None
