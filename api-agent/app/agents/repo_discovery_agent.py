@@ -5,7 +5,8 @@ from pathlib import Path
 from app.agents.base_agent import BaseAgent
 from app.prompts.prompt_sections import response_contract
 from app.schemas.repo_understanding import DiscoveryTurn, RepoUnderstanding
-from app.tools.path_safety import resolve_workspace_path, safe_join
+from app.tools.path_safety import resolve_workspace_path
+from app.tools.repo_explorer import RepoExplorer
 from app.utils.logging_utils import log_exception, log_step
 
 MAX_TURNS = 6
@@ -99,63 +100,13 @@ Evidence so far:
 """.strip()
 
     def _initial_observation(self, root: Path) -> str:
-        entries = self._list_dir(root, ".")
-        return f"### list_dir .\n{entries}"
+        return f"### list_dir .\n{self._explorer.list_dir(root, '.')}"
 
     def _execute(self, root: Path, request) -> str:
-        try:
-            if request.kind == "read_file":
-                return f"### read_file {request.target}\n{self._read_file(root, request.target)}"
-            if request.kind == "list_dir":
-                return f"### list_dir {request.target}\n{self._list_dir(root, request.target)}"
-            return f"### search {request.target}\n{self._search(root, request.target)}"
-        except Exception as exc:
-            return f"### {request.kind} {request.target}\nerror: {exc}"
+        return self._explorer.execute(root, request)
 
-    def _read_file(self, root: Path, target: str) -> str:
-        path = safe_join(root, target)
-        if not path.is_file():
-            return "error: file does not exist"
-        content = path.read_text(encoding="utf-8", errors="ignore")
-        if len(content) > MAX_FILE_CHARS:
-            return f"{content[:MAX_FILE_CHARS]}\n… [truncated]"
-        return content or "(empty file)"
-
-    def _list_dir(self, root: Path, target: str) -> str:
-        path = safe_join(root, target) if target not in ("", ".") else root
-        if not path.is_dir():
-            return "error: directory does not exist"
-        entries = sorted(
-            entry.name + ("/" if entry.is_dir() else "")
-            for entry in path.iterdir()
-            if entry.name not in IGNORED_DIRS
-        )
-        listed = entries[:MAX_DIR_ENTRIES]
-        suffix = (
-            f"\n… {len(entries) - MAX_DIR_ENTRIES} more entries omitted"
-            if len(entries) > MAX_DIR_ENTRIES
-            else ""
-        )
-        return "\n".join(listed) + suffix if listed else "(empty directory)"
-
-    def _search(self, root: Path, term: str) -> str:
-        hits: list[str] = []
-        for path in root.rglob("*"):
-            if len(hits) >= MAX_SEARCH_HITS:
-                break
-            if not path.is_file() or set(path.parts).intersection(IGNORED_DIRS):
-                continue
-            relative = path.relative_to(root).as_posix()
-            if term.lower() in relative.lower():
-                hits.append(relative)
-                continue
-            try:
-                if path.stat().st_size < 300_000:
-                    content = path.read_text(encoding="utf-8", errors="ignore")
-                    for line_number, line in enumerate(content.splitlines(), 1):
-                        if term in line:
-                            hits.append(f"{relative}:{line_number}: {line.strip()[:160]}")
-                            break
-            except OSError:
-                continue
-        return "\n".join(hits) if hits else "(no matches)"
+    @property
+    def _explorer(self) -> RepoExplorer:
+        if not hasattr(self, "_explorer_instance"):
+            self._explorer_instance = RepoExplorer()
+        return self._explorer_instance

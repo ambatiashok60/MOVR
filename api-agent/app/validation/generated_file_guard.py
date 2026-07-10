@@ -33,12 +33,27 @@ class GeneratedFileGuard:
     result's needs_review signal.
     """
 
+    MOCK_TOKENS = (
+        "@MockBean",
+        "@MockitoBean",
+        "Mockito.mock",
+        "@Mock",
+        "stubFor(",
+        "WireMock",
+        "MockWebServer",
+        "mocker.",
+        "monkeypatch",
+        "respx",
+        "responses.",
+    )
+
     def review(
         self,
         repo_path: str,
         output: TestCodeOutput,
         profile: RepoProfile,
         request: GenerateApiTestCodeRequest,
+        mock_stub_plan=None,
     ) -> tuple[TestCodeOutput, list[str], list[str]]:
         kept: list[GeneratedTestFileOutput] = []
         warnings: list[str] = []
@@ -59,6 +74,11 @@ class GeneratedFileGuard:
                     "verify the change preserves current coverage."
                 )
             kept.append(file)
+
+        mock_finding = self._mock_emission_finding(kept, mock_stub_plan, request)
+        if mock_finding:
+            warnings.append(mock_finding)
+            review_reasons.append(mock_finding)
 
         if not kept and output.files:
             review_reasons.append(
@@ -155,3 +175,32 @@ class GeneratedFileGuard:
         if path.endswith(".py"):
             return any(token in content for token in PYTHON_TEST_TOKENS)
         return True  # other languages: rely on the assertion check only
+
+    def _mock_emission_finding(
+        self,
+        kept: list[GeneratedTestFileOutput],
+        mock_stub_plan,
+        request: GenerateApiTestCodeRequest,
+    ) -> str | None:
+        """The mock/stub plan is a promise, not advice: CI tests generated for a
+        plan that names dependencies to mock must contain mocking/stubbing, or
+        they will hit real downstream services and flake."""
+        if mock_stub_plan is None or not getattr(
+            mock_stub_plan, "dependencies_to_mock", None
+        ):
+            return None
+        ci_content = "\n".join(
+            file.content for file in kept if file.test_target == "ci"
+        )
+        if not ci_content:
+            return None
+        if any(token in ci_content for token in self.MOCK_TOKENS):
+            return None
+        names = ", ".join(
+            dep.name for dep in mock_stub_plan.dependencies_to_mock[:5]
+        )
+        return (
+            "Mock emission gap: the mock/stub plan requires mocking dependencies "
+            f"({names}) but the generated CI tests contain no mocking or stubbing; "
+            "they would hit real downstream services."
+        )

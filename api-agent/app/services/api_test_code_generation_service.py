@@ -132,7 +132,8 @@ class ApiTestCodeGenerationService:
                 repo_understanding=repo_understanding,
             )
             output, guard_warnings, guard_reasons = self.file_guard.review(
-                request.repo_path, output, profile, request
+                request.repo_path, output, profile, request,
+                mock_stub_plan=mock_stub_plan,
             )
             warnings.extend(guard_warnings)
             if output.files:
@@ -191,7 +192,8 @@ class ApiTestCodeGenerationService:
                 repo_understanding=repo_understanding,
             )
             repaired, repair_guard_warnings, _ = self.file_guard.review(
-                request.repo_path, repaired, profile, request
+                request.repo_path, repaired, profile, request,
+                mock_stub_plan=mock_stub_plan,
             )
             warnings.extend(repair_guard_warnings)
             if not repaired.files:

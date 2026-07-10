@@ -5,7 +5,7 @@ from app.prompts.api_scenario_prompt import build_api_scenario_prompt
 from app.schemas.api_scenario import ApiScenario
 from app.schemas.api_scenario_request import GenerateApiScenariosRequest
 from app.schemas.execution_target import ExecutionTarget
-from app.schemas.llm_outputs import ScenarioPlanOutput
+from app.schemas.llm_outputs import ScenarioPlanOutput, ScenarioPlanTurn
 from app.schemas.repo_profile import RepoProfile
 
 
@@ -19,9 +19,18 @@ class ScenarioAgent(BaseAgent):
         repo_understanding=None,
     ) -> ScenarioPlanOutput:
         self.log_start("generating_scenarios", story_id=request.user_story_id)
-        prompt = build_api_scenario_prompt(request, profile, repo_understanding)
+        prompt = build_api_scenario_prompt(
+            request, profile, repo_understanding, include_contract=False
+        )
+        prompt += (
+            "\n\nBefore concluding, read the controllers/routes behind the story's "
+            "endpoints and the existing tests that cover them, so scenarios are "
+            "grounded in real behavior and do not duplicate existing coverage."
+        )
         try:
-            output = self.complete_structured(prompt, ScenarioPlanOutput)
+            output = self.complete_with_exploration(
+                prompt, ScenarioPlanTurn, request.repo_path
+            )
         except Exception:
             output = self._fallback_plan(request, profile)
         if output.scenarios:

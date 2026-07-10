@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.agents.scenario_agent import ScenarioAgent
 from app.schemas.api_scenario import ApiScenario
+from app.schemas.execution_target import ExecutionTarget
 from app.schemas.api_scenario_request import GenerateApiScenariosRequest
 from app.schemas.api_scenario_result import ApiScenarioGenerationResult
 from app.schemas.repo_profile import RepoProfile
@@ -76,6 +77,28 @@ class ApiScenarioGenerationService:
                 )
                 continue
             seen_ids.add(scenario.api_scenario_id)
+
+            # CI/stage classification must match reality: a stage scenario in a
+            # repo with no stage command, locations, or examples cannot run, so
+            # it is downgraded to CI and flagged rather than shipped broken.
+            strategy = profile.team_strategy
+            has_stage_infra = bool(
+                strategy.stage_command
+                or strategy.stage_test_locations
+                or strategy.existing_stage_test_examples
+            )
+            if scenario.execution_target != ExecutionTarget.CI and not has_stage_infra:
+                original = scenario.execution_target
+                scenario.execution_target = ExecutionTarget.CI
+                warnings.append(
+                    f"Scenario `{scenario.api_scenario_id}` was classified as "
+                    f"{original} but the repository has no stage test command, "
+                    "locations, or examples; downgraded to ci."
+                )
+                review_reasons.append(
+                    f"Scenario `{scenario.api_scenario_id}` needs stage "
+                    "infrastructure that was not detected in the repository."
+                )
             kept.append(scenario)
 
             if detected and scenario.endpoint and scenario.endpoint not in detected_paths:

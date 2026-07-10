@@ -15,6 +15,7 @@ def build_api_scenario_prompt(
     request: GenerateApiScenariosRequest,
     profile: RepoProfile,
     repo_understanding: RepoUnderstanding | None = None,
+    include_contract: bool = True,
 ) -> str:
     criteria = "\n".join(f"- {item}" for item in request.acceptance_criteria)
     return f"""
@@ -44,5 +45,5 @@ Additional context:
 
 {render_repo_profile(profile)}
 
-{response_contract(ScenarioPlanOutput)}
+{response_contract(ScenarioPlanOutput) if include_contract else ''}
 """.strip()

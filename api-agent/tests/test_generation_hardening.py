@@ -442,3 +442,88 @@ def test_guard_repair_loop_heals_rejected_generation(tmp_path) -> None:
         "src/test/java/com/acme/OrderControllerTest.java"
     ]
     assert any("Self-healing succeeded" in w for w in result.warnings)
+
+
+# --------------------------------------------------------------- phase 10
+
+def test_scenario_agent_explores_then_concludes(tmp_path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "orders.py").write_text("def create(): ...", encoding="utf-8")
+
+    class FakeLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def complete_structured(self, prompt, response_model):
+            self.calls += 1
+            if self.calls == 1:
+                return response_model.model_validate(
+                    {"requests": [{"kind": "read_file", "target": "src/orders.py"}]}
+                )
+            assert "def create()" in prompt  # evidence was fed back
+            return response_model.model_validate(
+                {"requests": [], "output": {"scenarios": [], "warnings": ["explored"]}}
+            )
+
+    from app.agents.scenario_agent import ScenarioAgent
+
+    agent = ScenarioAgent(llm_client=FakeLLM())
+    output = agent.generate(
+        GenerateApiScenariosRequest(
+            user_story_hierarchy_id=1, repo_path=str(tmp_path)
+        ),
+        _profile(repo_path=str(tmp_path)),
+    )
+    # empty scenarios -> falls back to scaffold, but the loop itself ran both turns
+    assert agent.llm.calls == 2
+
+
+def test_stage_scenario_downgraded_without_stage_infra() -> None:
+    output = ScenarioPlanOutput(
+        scenarios=[_scenario(execution_target=ExecutionTarget.STAGE)]
+    )
+    service = ApiScenarioGenerationService(FakeScenarioAgent(output))
+    result = service.generate("t1", _scenario_request(), _profile())
+    assert result.scenarios[0].execution_target == ExecutionTarget.CI
+    assert any("stage" in r.lower() for r in result.review_reasons)
+
+
+def test_stage_scenario_kept_when_stage_infra_exists() -> None:
+    profile = _profile()
+    profile.team_strategy.stage_command = "mvn verify -Pstage"
+    output = ScenarioPlanOutput(
+        scenarios=[_scenario(execution_target=ExecutionTarget.STAGE)]
+    )
+    service = ApiScenarioGenerationService(FakeScenarioAgent(output))
+    result = service.generate("t1", _scenario_request(), profile)
+    assert result.scenarios[0].execution_target == ExecutionTarget.STAGE
+
+
+def test_mock_emission_gap_flagged(tmp_path) -> None:
+    from app.schemas.mock_stub_plan import MockStubPlan
+
+    guard = GeneratedFileGuard()
+    plan = MockStubPlan.model_validate(
+        {"dependencies_to_mock": [{"name": "PaymentClient", "dependency_kind": "client",
+                                   "source_file": "src/x.java", "reason": "downstream"}]}
+    )
+    unmocked = TestCodeOutput(
+        files=[_file("src/test/java/com/acme/OrderControllerTest.java")]
+    )
+    _, warnings, reasons = guard.review(
+        str(tmp_path), unmocked, _profile(), _code_request(repo_path=str(tmp_path)),
+        mock_stub_plan=plan,
+    )
+    assert any("Mock emission gap" in r for r in reasons)
+
+    mocked = TestCodeOutput(
+        files=[_file(
+            "src/test/java/com/acme/OrderControllerTest.java",
+            content=JAVA_TEST.replace("class OrderTest {", "@MockBean PaymentClient pc;\nclass OrderTest {"),
+        )]
+    )
+    _, _, reasons2 = guard.review(
+        str(tmp_path), mocked, _profile(), _code_request(repo_path=str(tmp_path)),
+        mock_stub_plan=plan,
+    )
+    assert not any("Mock emission gap" in r for r in reasons2)

@@ -22,6 +22,7 @@ def build_api_test_code_prompt(
     source_context: GenerationSourceContext | None = None,
     mock_stub_plan: MockStubPlan | None = None,
     repo_understanding: RepoUnderstanding | None = None,
+    include_contract: bool = True,
 ) -> str:
     steps = "\n".join(f"- {step}" for step in request.scenario_steps)
     assertions = "\n".join(f"- {assertion}" for assertion in request.assertions)
@@ -42,6 +43,10 @@ Rules:
 - Reuse detected fixture/auth/client helpers where possible.
 - Generate or configure mocks/stubs for controller dependencies and downstream clients when needed.
 - Prefer modifying/adding the smallest number of files required for a compiling useful test.
+- Every dependency the mock/stub plan marks for mocking MUST actually be mocked or stubbed in CI tests.
+- Spring WebClient: never deep-stub the fluent chain with Mockito; use MockWebServer or WireMock (or the repo's existing idiom).
+- RestAssured CI tests: boot the app (@SpringBootTest RANDOM_PORT) and stub downstream dependencies with WireMock or @MockBean/@MockitoBean.
+- Stage tests: no mocks or stubs; use the repo's real auth/config helpers against the deployed environment.
 
 {render_repo_understanding(repo_understanding)}
 
@@ -72,5 +77,5 @@ Additional context:
 
 {render_mock_stub_plan(mock_stub_plan)}
 
-{response_contract(TestCodeOutput)}
+{response_contract(TestCodeOutput) if include_contract else ''}
 """.strip()
