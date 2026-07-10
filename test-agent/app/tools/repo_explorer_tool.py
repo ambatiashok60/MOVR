@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from app.security.data_governance_service import DataGovernanceService
+
 logger = logging.getLogger(__name__)
 
 MAX_FILE_CHARS = 6000
@@ -18,8 +20,11 @@ class RepoExplorer:
     run's evidence trail is fully reconstructable.
     """
 
-    def __init__(self, repo_path: str) -> None:
+    def __init__(
+        self, repo_path: str, governance: DataGovernanceService | None = None
+    ) -> None:
         self.root = Path(repo_path).resolve()
+        self.governance = governance or DataGovernanceService()
 
     def execute(self, request) -> str:
         try:
@@ -53,6 +58,12 @@ class RepoExplorer:
         if not path.is_file():
             return "error: file does not exist"
         content = path.read_text(encoding="utf-8", errors="ignore")
+        released = self.governance.release_file(
+            path.relative_to(self.root).as_posix(), content
+        )
+        if released is None:
+            return "error: file is restricted by the repository data policy"
+        content = released
         return f"{content[:MAX_FILE_CHARS]}\n… [truncated]" if len(content) > MAX_FILE_CHARS else (content or "(empty file)")
 
     def _list_dir(self, target: str) -> str:
@@ -74,6 +85,8 @@ class RepoExplorer:
             if not path.is_file() or set(path.parts).intersection(IGNORED_DIRS):
                 continue
             rel = path.relative_to(self.root).as_posix()
+            if self.governance.is_blocked(rel):
+                continue
             if term.lower() in rel.lower():
                 hits.append(rel)
                 continue
@@ -81,7 +94,8 @@ class RepoExplorer:
                 if path.stat().st_size < 300_000:
                     for n, line in enumerate(path.read_text(encoding="utf-8", errors="ignore").splitlines(), 1):
                         if term in line:
-                            hits.append(f"{rel}:{n}: {line.strip()[:160]}")
+                            snippet = self.governance.redact(line.strip()[:160]).content
+                            hits.append(f"{rel}:{n}: {snippet}")
                             break
             except OSError:
                 continue

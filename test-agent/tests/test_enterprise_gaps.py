@@ -12,8 +12,10 @@ from app.governance.generation_budget import (
     BudgetExceededError,
     GenerationBudget,
 )
-from app.schemas.exploration import SpecPlacementTurn
+from app.schemas.exploration import ExplorationRequest, SpecPlacementTurn
 from app.schemas.generation_budget import BudgetLimits
+from app.security.data_governance_service import DataGovernanceService
+from app.tools.repo_explorer_tool import RepoExplorer
 from app.schemas.behavioral_test_unit import AnchorFlowContext, BehavioralTestUnit
 from app.schemas.code_patch import AppliedPatch, CodePatch, PatchSet, PatchWriteResult
 from app.schemas.decision_trace import DecisionTrace
@@ -867,3 +869,65 @@ class TestIdempotency:
         )
 
         assert service.find(fingerprint) is None
+
+
+class TestDataGovernance:
+    def test_classification_tiers(self) -> None:
+        service = DataGovernanceService()
+
+        assert service.classify(".env") == "restricted"
+        assert service.classify("config/.env.production") == "restricted"
+        assert service.classify("certs/server.pem") == "restricted"
+        assert service.classify("deploy/id_rsa") == "restricted"
+        assert service.classify("src/auth/token-helper.ts") == "sensitive"
+        assert service.classify("playwright.config.ts") == "internal"
+        assert service.classify("e2e/employee.spec.ts") == "safe"
+
+    def test_secrets_are_redacted_before_release(self) -> None:
+        service = DataGovernanceService()
+        content = (
+            "const apiKey = 'sk-abcdefghijklmnopqrstuvwx';\n"
+            "password: hunter2secret\n"
+            "const AWS = 'AKIAIOSFODNN7EXAMPLE';\n"
+            "const normal = 'employee list page';\n"
+        )
+
+        released = service.release_file("src/config/settings.ts", content)
+
+        assert released is not None
+        assert "sk-abcdefghijklmnopqrstuvwx" not in released
+        assert "hunter2secret" not in released
+        assert "AKIAIOSFODNN7EXAMPLE" not in released
+        assert "employee list page" in released
+        assert service.audit.redactions >= 3
+        assert service.audit.files_sent == ["src/config/settings.ts"]
+
+    def test_restricted_files_are_never_released(self) -> None:
+        service = DataGovernanceService()
+
+        released = service.release_file(".env", "API_KEY=super-secret-value")
+
+        assert released is None
+        assert service.audit.files_blocked == [".env"]
+        assert service.audit.files_sent == []
+
+    def test_repo_explorer_blocks_and_redacts(self, tmp_path: Path) -> None:
+        (tmp_path / ".env").write_text("API_KEY=super-secret-value\n", encoding="utf-8")
+        (tmp_path / "app.ts").write_text(
+            "const password = 'hunter2secret';\nconst page = 'employees';\n",
+            encoding="utf-8",
+        )
+        explorer = RepoExplorer(str(tmp_path))
+
+        blocked = explorer.execute(
+            ExplorationRequest(kind="read_file", target=".env", reason="check env")
+        )
+        redacted = explorer.execute(
+            ExplorationRequest(kind="read_file", target="app.ts", reason="check app")
+        )
+
+        assert "restricted by the repository data policy" in blocked
+        assert "super-secret-value" not in blocked
+        assert "hunter2secret" not in redacted
+        assert "[REDACTED]" in redacted
+        assert "employees" in redacted
