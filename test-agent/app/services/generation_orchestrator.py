@@ -43,6 +43,7 @@ from app.services.technology_intelligence_service import TechnologyIntelligenceS
 from app.services.test_action_service import TestActionService
 from app.services.test_file_classifier_service import TestFileClassifierService
 from app.services.test_value_service import TestValueService
+from app.services.traceability_service import TraceabilityService
 from app.schemas.validation_result import ValidationCheck, ValidationResult
 from app.validation.repo_command_validator import RepoCommandValidator
 from app.logging_config import log_event
@@ -66,6 +67,7 @@ class GenerationOrchestrator:
         self.results = ResultBuilderService()
         self.coverage = CoveragePreservationService()
         self.test_value = TestValueService()
+        self.traceability = TraceabilityService()
 
     def generate(self, request: GenerationRequest) -> GenerationResult:
         context = {"job_id": request.job_id, "repo_path": request.repo_path, "stage": "generation"}
@@ -326,6 +328,16 @@ class GenerationOrchestrator:
                 request, patches, patch_result, behavior, review_reasons
             )
 
+            traceability_matrix = self._run_optional_stage(
+                request.job_id,
+                "requirement_traceability",
+                lambda: self.traceability.build(request, intent, patches, behavior),
+            )
+            if traceability_matrix is not None:
+                review_reasons.extend(
+                    self.traceability.review_reasons(traceability_matrix)
+                )
+
             decision_trace = [
                 trace
                 for trace in (
@@ -347,6 +359,7 @@ class GenerationOrchestrator:
                     review_reasons,
                     coverage=coverage_report,
                     test_value=test_value_report,
+                    traceability=traceability_matrix,
                 ),
                 completed=lambda built: {
                     "files_changed": len(built.files_changed),

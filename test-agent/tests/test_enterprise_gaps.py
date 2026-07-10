@@ -5,7 +5,10 @@ from pathlib import Path
 from app.coverage.coverage_preservation_service import CoveragePreservationService
 from app.schemas.behavioral_test_unit import BehavioralTestUnit
 from app.schemas.code_patch import CodePatch, PatchSet
+from app.schemas.functional_intent import FunctionalIntent
+from app.schemas.generation_request import GenerationRequest
 from app.services.test_value_service import TestValueService
+from app.services.traceability_service import TraceabilityService
 
 
 EXISTING_SPEC = """import { test, expect } from '@playwright/test';
@@ -232,3 +235,84 @@ class TestTestValueEvaluator:
 
         assert report.assessments == []
         assert "No newly generated tests" in report.summary
+
+
+class TestRequirementTraceability:
+    def _request(self, steps: list[str]) -> GenerationRequest:
+        return GenerationRequest(
+            job_id="job-1",
+            repo_path="/tmp/repo",
+            test_case_name="Employee empty state",
+            steps=steps,
+        )
+
+    def test_requirements_map_to_generated_and_existing_code(self) -> None:
+        service = TraceabilityService()
+        intent = FunctionalIntent(
+            capability="Employee empty state",
+            assertions=["Verify empty state banner is visible"],
+        )
+        patches = PatchSet(
+            patches=[
+                CodePatch(
+                    path="e2e/employee.spec.ts",
+                    operation="append",
+                    content=(
+                        "test('shows empty state banner', async ({ page }) => {\n"
+                        "  await page.goto('/employees?filter=none');\n"
+                        "  await expect(page.locator('.empty-state-banner')).toBeVisible();\n"
+                        "});\n"
+                    ),
+                )
+            ]
+        )
+        existing = [_unit_from_spec("e2e/employee.spec.ts", EXISTING_SPEC, "creates an employee")]
+
+        matrix = service.build(
+            self._request(["Create an employee", "Verify empty state banner visible"]),
+            intent,
+            patches,
+            existing,
+        )
+
+        assert matrix.complete is True
+        assert matrix.missing == 0
+        by_requirement = {trace.requirement: trace for trace in matrix.requirements}
+        assert by_requirement["Create an employee"].source == "existing_flow"
+        assert "creates an employee" in by_requirement["Create an employee"].covered_by
+        assert by_requirement["Verify empty state banner visible"].source == "generated"
+        assert (
+            by_requirement["Verify empty state banner visible"].covered_by
+            == "e2e/employee.spec.ts"
+        )
+        assert service.review_reasons(matrix) == []
+
+    def test_unimplemented_requirement_is_reported_missing(self) -> None:
+        service = TraceabilityService()
+        patches = PatchSet(
+            patches=[
+                CodePatch(
+                    path="e2e/employee.spec.ts",
+                    operation="append",
+                    content="test('noop', async ({ page }) => {});\n",
+                )
+            ]
+        )
+
+        matrix = service.build(
+            self._request(["Export quarterly payroll summary as PDF"]),
+            FunctionalIntent(),
+            patches,
+            [],
+        )
+
+        assert matrix.complete is False
+        assert matrix.missing == 1
+        [trace] = matrix.requirements
+        assert trace.status == "missing"
+        assert trace.covered_by is None
+        reasons = service.review_reasons(matrix)
+        assert reasons == [
+            "Requirement not traceable to any code: "
+            "'Export quarterly payroll summary as PDF'."
+        ]

@@ -6,6 +6,7 @@ from app.schemas.coverage import CoveragePreservationReport
 from app.schemas.decision_trace import DecisionTrace
 from app.schemas.repo_profile import RepoProfile
 from app.schemas.test_value import TestValueReport
+from app.schemas.traceability import TraceabilityMatrix
 from app.schemas.validation_result import ValidationResult
 
 
@@ -22,3 +23,4 @@ class GenerationResult(BaseModel):
     validation: ValidationResult | None = None
     coverage: CoveragePreservationReport | None = None
     test_value: TestValueReport | None = None
+    traceability: TraceabilityMatrix | None = None
