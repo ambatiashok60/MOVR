@@ -13,6 +13,7 @@ from app.agents.functional_intent_agent import FunctionalIntentAgent
 from app.agents.locator_reasoning_agent import LocatorReasoningAgent
 from app.agents.repair_agent import RepairAgent
 from app.config import settings
+from app.coverage.coverage_preservation_service import CoveragePreservationService
 from app.errors import UnsupportedRepositoryError
 from app.patching.scoped_patch_writer import ScopedPatchWriter
 from app.schemas.behavioral_test_unit import (
@@ -62,6 +63,7 @@ class GenerationOrchestrator:
         self.patch_writer = ScopedPatchWriter()
         self.validator = RepoCommandValidator()
         self.results = ResultBuilderService()
+        self.coverage = CoveragePreservationService()
 
     def generate(self, request: GenerationRequest) -> GenerationResult:
         context = {"job_id": request.job_id, "repo_path": request.repo_path, "stage": "generation"}
@@ -310,6 +312,10 @@ class GenerationOrchestrator:
                 repair=repair,
             )
 
+            coverage_report = self._assess_coverage_preservation(
+                request, patches, patch_result, behavior, review_reasons
+            )
+
             decision_trace = [
                 trace
                 for trace in (
@@ -329,6 +335,7 @@ class GenerationOrchestrator:
                     decision_trace,
                     repo_profile,
                     review_reasons,
+                    coverage=coverage_report,
                 ),
                 completed=lambda built: {
                     "files_changed": len(built.files_changed),
@@ -364,6 +371,45 @@ class GenerationOrchestrator:
                 exc,
             )
             raise
+
+    def _assess_coverage_preservation(
+        self,
+        request: GenerationRequest,
+        patches: PatchSet,
+        patch_result: PatchWriteResult,
+        behavior: list[BehavioralTestUnit],
+        review_reasons: list[str],
+    ) -> Any | None:
+        """Compare behavioral coverage graphs before and after the applied patches.
+
+        Only meaningful when patches actually landed on disk; a run that failed
+        plan validation before writing has nothing to compare. Removed or
+        weakened coverage is flagged for review, never silently accepted.
+        """
+        if not patch_result.applied:
+            log_event(
+                logger,
+                logging.INFO,
+                "coverage_preservation",
+                "skipped",
+                job_id=request.job_id,
+                reason="no_patches_applied",
+            )
+            return None
+
+        def build_report() -> Any:
+            before = self.coverage.snapshot(behavior)
+            after = self.coverage.snapshot_after_patches(
+                request.repo_path, patches, before
+            )
+            return self.coverage.compare(before, after)
+
+        report = self._run_optional_stage(
+            request.job_id, "coverage_preservation", build_report
+        )
+        if report is not None:
+            review_reasons.extend(self.coverage.review_reasons(report))
+        return report
 
     def _run_advisory_stage(self, job_id: str, stage: str, action: Any) -> None:
         log_event(logger, logging.INFO, stage, "started", job_id=job_id, advisory=True)

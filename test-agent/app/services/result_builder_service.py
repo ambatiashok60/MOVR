@@ -4,6 +4,7 @@ import logging
 
 
 from app.schemas.code_patch import PatchSet, PatchWriteResult
+from app.schemas.coverage import CoveragePreservationReport
 from app.schemas.decision_trace import DecisionTrace
 from app.schemas.generation_request import GenerationRequest
 from app.schemas.generation_result import GenerationResult
@@ -23,6 +24,8 @@ class ResultBuilderService:
         decision_trace: list[DecisionTrace] | None = None,
         repo_profile: RepoProfile | None = None,
         review_reasons: list[str] | None = None,
+        *,
+        coverage: CoveragePreservationReport | None = None,
     ) -> GenerationResult:
         logger.info(
             "[playwright-generation] job_id=%s stage=result_builder status=started",
@@ -47,6 +50,7 @@ class ResultBuilderService:
                 repo_profile=repo_profile,
                 decision_trace=decision_trace or [],
                 validation=validation,
+                coverage=coverage,
             )
         except Exception as exc:
             logger.exception(
