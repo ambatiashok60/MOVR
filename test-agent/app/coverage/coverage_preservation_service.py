@@ -23,6 +23,9 @@ _API_PATTERN = re.compile(
     r"\s*\(\s*['\"`]?([^'\"`,)]*)"
 )
 _INTERACTION_PATTERN = re.compile(r"\.(click|fill|check|uncheck|selectOption|press|hover)\s*\(")
+_DATA_INPUT_PATTERN = re.compile(
+    r"\.(?:fill|type|selectOption)\s*\([^,)]*,\s*['\"`]([^'\"`]+)['\"`]"
+)
 
 
 class CoveragePreservationService:
@@ -140,6 +143,7 @@ class CoveragePreservationService:
         navigations = _NAVIGATION_PATTERN.findall(source)
         api_calls = [match for match in _API_PATTERN.findall(source) if match]
         interactions = sorted({match for match in _INTERACTION_PATTERN.findall(source)})
+        data_inputs = sorted({match for match in _DATA_INPUT_PATTERN.findall(source)})
         return BehaviorCoverageEntry(
             file_path=unit.file_path,
             describe_title=unit.describe_title,
@@ -148,6 +152,7 @@ class CoveragePreservationService:
             navigations=navigations,
             api_calls=api_calls,
             interactions=interactions,
+            data_inputs=data_inputs,
             page_objects=unit.page_objects,
             fixtures=unit.fixtures,
         )

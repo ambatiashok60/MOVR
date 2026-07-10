@@ -18,6 +18,7 @@ class BehaviorCoverageEntry(BaseModel):
     navigations: list[str] = Field(default_factory=list)
     api_calls: list[str] = Field(default_factory=list)
     interactions: list[str] = Field(default_factory=list)
+    data_inputs: list[str] = Field(default_factory=list)
     page_objects: list[str] = Field(default_factory=list)
     fixtures: list[str] = Field(default_factory=list)
 
@@ -31,6 +32,7 @@ class BehaviorCoverageEntry(BaseModel):
             *(f"nav:{item}" for item in self.navigations),
             *(f"api:{item}" for item in self.api_calls),
             *(f"interact:{item}" for item in self.interactions),
+            *(f"data:{item}" for item in self.data_inputs),
         }
 
 

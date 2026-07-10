@@ -9,6 +9,7 @@ from app.schemas.decision_trace import DecisionTrace
 from app.schemas.generation_request import GenerationRequest
 from app.schemas.generation_result import GenerationResult
 from app.schemas.repo_profile import RepoProfile
+from app.schemas.test_value import TestValueReport
 from app.schemas.validation_result import ValidationResult
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,7 @@ class ResultBuilderService:
         review_reasons: list[str] | None = None,
         *,
         coverage: CoveragePreservationReport | None = None,
+        test_value: TestValueReport | None = None,
     ) -> GenerationResult:
         logger.info(
             "[playwright-generation] job_id=%s stage=result_builder status=started",
@@ -51,6 +53,7 @@ class ResultBuilderService:
                 decision_trace=decision_trace or [],
                 validation=validation,
                 coverage=coverage,
+                test_value=test_value,
             )
         except Exception as exc:
             logger.exception(

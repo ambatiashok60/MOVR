@@ -42,6 +42,7 @@ from app.services.spec_placement_service import SpecPlacementService
 from app.services.technology_intelligence_service import TechnologyIntelligenceService
 from app.services.test_action_service import TestActionService
 from app.services.test_file_classifier_service import TestFileClassifierService
+from app.services.test_value_service import TestValueService
 from app.schemas.validation_result import ValidationCheck, ValidationResult
 from app.validation.repo_command_validator import RepoCommandValidator
 from app.logging_config import log_event
@@ -64,6 +65,7 @@ class GenerationOrchestrator:
         self.validator = RepoCommandValidator()
         self.results = ResultBuilderService()
         self.coverage = CoveragePreservationService()
+        self.test_value = TestValueService()
 
     def generate(self, request: GenerationRequest) -> GenerationResult:
         context = {"job_id": request.job_id, "repo_path": request.repo_path, "stage": "generation"}
@@ -299,6 +301,14 @@ class GenerationOrchestrator:
                     },
                 )
 
+            test_value_report = self._run_optional_stage(
+                request.job_id,
+                "test_value_analysis",
+                lambda: self.test_value.evaluate(patches, behavior),
+            )
+            if test_value_report is not None:
+                review_reasons.extend(self.test_value.review_reasons(test_value_report))
+
             patch_result, validation, patches = self._write_validate_and_repair(
                 request=request,
                 patches=patches,
@@ -336,6 +346,7 @@ class GenerationOrchestrator:
                     repo_profile,
                     review_reasons,
                     coverage=coverage_report,
+                    test_value=test_value_report,
                 ),
                 completed=lambda built: {
                     "files_changed": len(built.files_changed),
