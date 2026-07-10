@@ -195,6 +195,12 @@ class GenerationOrchestrator:
             self._flag_low_placement_confidence(placement, review_reasons)
             action = self._reconcile_action_with_placement(placement, action)
             action = self._gate_action_confidence(action, review_reasons)
+            self._flag_shallow_decision_trace(
+                "spec_placement", placement.decision_trace, review_reasons
+            )
+            self._flag_shallow_decision_trace(
+                "test_action", action.decision_trace, review_reasons
+            )
 
             existing_test_context = self._run_stage(
                 request.job_id,
@@ -754,6 +760,36 @@ class GenerationOrchestrator:
             confidence=placement.confidence,
             threshold=threshold,
             target_spec=placement.target_spec_file,
+        )
+
+    def _flag_shallow_decision_trace(
+        self,
+        stage: str,
+        trace: Any | None,
+        review_reasons: list[str],
+    ) -> None:
+        """Quality floor for LLM reasoning: a decision without a stated decision,
+        justification, or evidence validates structurally but is unreviewable, so
+        it is flagged (non-blocking) rather than trusted silently."""
+        if trace is None:
+            return
+        decision = (getattr(trace, "decision", "") or "").strip()
+        justification = (getattr(trace, "justification", "") or "").strip()
+        evidence = getattr(trace, "evidence", None) or []
+        if decision not in ("", "undecided") and justification and evidence:
+            return
+        review_reasons.append(
+            f"{stage} decision trace lacks a decision, justification, or evidence; "
+            "manual review recommended."
+        )
+        log_event(
+            logger,
+            logging.WARNING,
+            stage,
+            "shallow_decision_trace",
+            decision=decision or "empty",
+            has_justification=bool(justification),
+            evidence_count=len(evidence),
         )
 
     def _flag_low_flow_merge_confidence(

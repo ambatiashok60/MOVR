@@ -12,3 +12,5 @@ class ApiScenarioGenerationResult(BaseModel):
     scenarios: list[ApiScenario] = Field(default_factory=list)
     repo_findings: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    needs_review: bool = False
+    review_reasons: list[str] = Field(default_factory=list)

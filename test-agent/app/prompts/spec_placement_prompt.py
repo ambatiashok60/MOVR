@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from app.prompts.prompt_sections import as_json, response_contract
+from app.prompts.prompt_sections import (
+    as_json,
+    curated_inventory,
+    curated_ui_context,
+    response_contract,
+)
 from app.schemas.functional_intent import FunctionalIntent
 from app.schemas.playwright_ui_context import PlaywrightUiContext
 from app.schemas.repository_inventory import RepositoryInventory
@@ -26,10 +31,10 @@ Functional intent:
 {as_json(intent or {})}
 
 Repository inventory:
-{as_json(inventory)}
+{as_json(curated_inventory(inventory))}
 
 Playwright UI context:
-{as_json(ui_context or {})}
+{as_json(curated_ui_context(ui_context))}
 
 {response_contract(SpecPlacementDecision)}
 """

@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from app.prompts.prompt_sections import as_json, response_contract
+from app.prompts.prompt_sections import (
+    as_json,
+    curated_test_units,
+    curated_ui_context,
+    response_contract,
+)
 from app.schemas.behavioral_test_unit import BehavioralTestUnit
 from app.schemas.playwright_ui_context import PlaywrightUiContext
 from app.schemas.spec_placement import SpecPlacementDecision
@@ -27,10 +32,10 @@ Spec placement:
 {as_json(placement)}
 
 Ranked candidate tests:
-{as_json(ranked_tests)}
+{as_json(curated_test_units(ranked_tests))}
 
 Playwright UI context:
-{as_json(ui_context or {})}
+{as_json(curated_ui_context(ui_context))}
 
 {response_contract(TestActionDecision)}
 """

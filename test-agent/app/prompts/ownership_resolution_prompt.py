@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.prompts.prompt_sections import as_json, response_contract
+from app.prompts.prompt_sections import as_json, curated_inventory, response_contract
 from app.schemas.functional_intent import FunctionalIntent
 from app.schemas.ownership_resolution import OwnershipResolution
 from app.schemas.repository_inventory import RepositoryInventory
@@ -31,7 +31,7 @@ Needed locators and components (source evidence):
 {as_json(source or {})}
 
 Repository inventory:
-{as_json(inventory)}
+{as_json(curated_inventory(inventory))}
 
 {response_contract(OwnershipResolution)}
 """

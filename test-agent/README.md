@@ -556,6 +556,31 @@ at all was hard-rejected (422 unsupported). Bootstrap mode closes that:
   dependency patches survive critic review and repair; on collision the
   deterministic scaffold wins over LLM-generated duplicates.
 
+### Prompt hardening (contract quality and context discipline)
+
+The Pydantic layer guarantees bad output cannot ship; prompt hardening reduces
+how often the repair loop and low-confidence fallbacks fire in the first place:
+
+- **Real examples for every structured model.** `CandidateRanking`,
+  `OwnershipResolution`, `FlowMergePlan`, `LocatorDecisionSet`, and
+  `SourceIntelligence` previously fell through to a generic fallback that showed
+  an empty object as the "valid example" — actively teaching the model to fail
+  validation. Each now has a canonical valid/invalid pair, and unknown models get
+  schema-only guidance instead of a fabricated example.
+- **Action-labeled PatchSet few-shots.** The patch contract now shows all three
+  shapes the guards accept: `create_new_spec`, `append_new_test` (anchor-reusing
+  append), and `extend_existing_test` (exact-range replace preserving the title
+  and proven steps).
+- **Context curation.** Prompts no longer dump raw payloads: repository
+  inventory is stripped of per-file hashes and capped (E2E candidates kept
+  first), every UI-context evidence list is capped, and candidate tests are
+  capped to the top 25 with truncated excerpts. The extend target's
+  `ExistingTestContext` excerpt is deliberately never truncated — it is the
+  replace source.
+- **DecisionTrace quality floor.** A placement/action trace with no decision,
+  justification, or evidence validates structurally but is unreviewable; it now
+  adds a `review_reasons` entry (non-blocking).
+
 ### Old vs new at a glance
 
 ```text
@@ -577,6 +602,9 @@ Ownership inputs            inventory only              intent + source evidence
 Owner creation promise      unenforced                  emission guard
 Create-spec grounding       repo-wide context only      template anchor + best practices
 No-framework repos          rejected (422)              bootstrap scaffold + guard
+Schema examples             4 models, {} fallback       all models, no fabricated example
+Prompt payloads             raw dumps (incl. hashes)    curated + capped context
+Trace quality               structural only             shallow traces flagged
 ```
 
 ### Where these live
@@ -592,7 +620,8 @@ app/schemas/generation_result.py        needs_review + review_reasons
 app/prompts/candidate_ranking_prompt.py ranking prompt (new)
 app/prompts/flow_merge_prompt.py        grounded in existing test source
 app/prompts/code_generation_prompt.py   anchor/flow/ownership/locator reuse rules
-app/prompts/prompt_sections.py          playwright_best_practices scaffold
+app/prompts/prompt_sections.py          best-practices scaffold, per-model
+                                        examples, context curation helpers
 app/prompts/ownership_resolution_prompt.py  needed-locators grounding
 app/agents/candidate_test_ranking_agent.py  real LLM ranking + fallback
 app/services/generation_orchestrator.py reconcile, gates, optional stages,

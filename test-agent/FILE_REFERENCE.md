@@ -225,10 +225,17 @@ one-or-fewer candidates, or on error.
 
 ### `app/prompts/prompt_sections.py`
 
-Reusable prompt section helpers shared by other prompt builders. Includes
-`playwright_best_practices()`, the modern-Playwright scaffold injected for
-`create_new_spec` — the governing standard when the repository has nothing to
-reuse (repo conventions win when they exist).
+Reusable prompt section helpers shared by other prompt builders:
+
+- `response_contract()` — schema + canonical valid/invalid examples for every
+  structured model (labeled per-action examples for `PatchSet`); unknown models
+  get schema-only guidance, never a fabricated empty example.
+- `curated_inventory()` / `curated_ui_context()` / `curated_test_units()` —
+  prompt-payload curation: strips per-file hashes, caps evidence lists with
+  omission markers, keeps E2E candidates first, truncates candidate excerpts
+  (never the extend target's).
+- `playwright_best_practices()` — the modern-Playwright scaffold injected for
+  `create_new_spec`, governing when the repository has nothing to reuse.
 
 ### `app/prompts/functional_intent_prompt.py`
 
@@ -609,8 +616,9 @@ action reconciliation, confidence gating, LLM ranking, anchor flow selection
 (append sibling and create template), append-reuse and extend-preservation
 guards, flow-merge grounding, reference-integrity (imports + page-object
 members), ownership emission, created-spec structure, the best-practices
-prompt scaffold, bootstrap classification, the framework scaffold service, and
-the bootstrap guard.
+prompt scaffold, bootstrap classification, the framework scaffold service,
+the bootstrap guard, per-model contract examples, context curation, and the
+shallow-trace review flag.
 
 ## Current Integration Notes
 

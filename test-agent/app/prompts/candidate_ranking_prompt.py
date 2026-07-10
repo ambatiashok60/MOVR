@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.prompts.prompt_sections import as_json, response_contract
+from app.prompts.prompt_sections import as_json, curated_test_units, response_contract
 from app.schemas.behavioral_test_unit import BehavioralTestUnit
 from app.schemas.candidate_ranking import CandidateRanking
 from app.schemas.functional_intent import FunctionalIntent
@@ -26,7 +26,7 @@ Functional intent:
 {as_json(intent)}
 
 Candidate tests:
-{as_json([candidate.model_dump() for candidate in candidates])}
+{as_json(curated_test_units(candidates))}
 
 {response_contract(CandidateRanking)}
 """

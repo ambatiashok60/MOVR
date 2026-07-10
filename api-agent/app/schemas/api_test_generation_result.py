@@ -22,3 +22,5 @@ class ApiTestGenerationResult(BaseModel):
     source_files_used: list[SourceSnippet] = Field(default_factory=list)
     mock_stub_plan: MockStubPlan | None = None
     warnings: list[str] = Field(default_factory=list)
+    needs_review: bool = False
+    review_reasons: list[str] = Field(default_factory=list)

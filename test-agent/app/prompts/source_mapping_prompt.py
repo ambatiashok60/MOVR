@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.prompts.prompt_sections import as_json, response_contract
+from app.prompts.prompt_sections import as_json, curated_ui_context, response_contract
 from app.schemas.functional_intent import FunctionalIntent
 from app.schemas.playwright_ui_context import PlaywrightUiContext
 from app.schemas.source_intelligence import SourceIntelligence
@@ -23,7 +23,7 @@ Functional intent:
 {as_json(intent)}
 
 Playwright UI context:
-{as_json(ui_context or {})}
+{as_json(curated_ui_context(ui_context))}
 
 {response_contract(SourceIntelligence)}
 """

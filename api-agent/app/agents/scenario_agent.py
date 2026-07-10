@@ -16,9 +16,10 @@ class ScenarioAgent(BaseAgent):
         self,
         request: GenerateApiScenariosRequest,
         profile: RepoProfile,
+        repo_understanding=None,
     ) -> ScenarioPlanOutput:
         self.log_start("generating_scenarios", story_id=request.user_story_id)
-        prompt = build_api_scenario_prompt(request, profile)
+        prompt = build_api_scenario_prompt(request, profile, repo_understanding)
         try:
             output = self.complete_structured(prompt, ScenarioPlanOutput)
         except Exception:
@@ -91,5 +92,9 @@ class ScenarioAgent(BaseAgent):
         ]
         return ScenarioPlanOutput(
             scenarios=scenarios,
-            warnings=["Used deterministic fallback scenario planning because model output was unavailable."],
+            warnings=[
+                "SCAFFOLD: deterministic template scenarios were used because model "
+                "output was unavailable. These are not derived from the story or "
+                "repository behavior and are not real coverage; manual review required."
+            ],
         )

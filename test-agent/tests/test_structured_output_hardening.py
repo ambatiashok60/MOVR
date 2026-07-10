@@ -878,6 +878,145 @@ def test_bootstrap_scaffold_guard_requires_config_and_dependency() -> None:
     assert orchestrator._bootstrap_scaffold_check(missing, requires_bootstrap=False).passed is True
 
 
+def test_response_contract_has_real_ownership_example() -> None:
+    from app.prompts.prompt_sections import response_contract
+    from app.schemas.ownership_resolution import OwnershipResolution
+
+    contract = response_contract(OwnershipResolution)
+
+    assert '"owner_path": "e2e/pages/plan-page.ts"' in contract
+    assert "reuse_existing_page_object" in contract
+    assert "Valid response example:\n{}" not in contract
+
+
+def test_response_contract_no_fabricated_example_for_unknown_model() -> None:
+    from pydantic import BaseModel
+
+    from app.prompts.prompt_sections import response_contract
+
+    class UnknownDecision(BaseModel):
+        verdict: str
+
+    contract = response_contract(UnknownDecision)
+
+    assert "Valid response example" not in contract
+    assert "No canonical example is available" in contract
+    assert "JSON schema:" in contract
+
+
+def test_patchset_contract_includes_labeled_action_examples() -> None:
+    from app.prompts.prompt_sections import response_contract
+
+    contract = response_contract(PatchSet)
+
+    assert "Valid response example (create_new_spec):" in contract
+    assert "Valid response example (append_new_test (reuse the anchor flow's setup)):" in contract
+    assert "extend_existing_test (exact replace of the selected block)" in contract
+    assert '"operation": "replace"' in contract
+    assert '"start_line": 10' in contract
+
+
+def test_curated_inventory_strips_hashes_caps_lists_and_prioritizes_e2e() -> None:
+    from app.prompts.prompt_sections import curated_inventory
+    from app.schemas.repository_inventory import RepositoryInventory
+    from app.schemas.test_file_classification import TestFileClassification
+
+    inventory = RepositoryInventory(
+        repo_path="/tmp/repo",
+        repo_head="abc",
+        file_hashes={f"src/file{i}.ts": f"hash{i}" for i in range(100)},
+        test_files=[
+            TestFileClassification(path="tests/unit.test.ts", kind="unit"),
+            TestFileClassification(
+                path="tests/plans.spec.ts", kind="e2e", is_e2e_candidate=True
+            ),
+        ],
+        page_objects=[f"pages/page{i}.ts" for i in range(45)],
+    )
+
+    curated = curated_inventory(inventory, max_items=40)
+
+    assert "file_hashes" not in curated
+    assert len(curated["page_objects"]) == 40
+    assert "5 more item(s) omitted" in curated["page_objects_omitted"]
+    assert curated["test_files"][0]["path"] == "tests/plans.spec.ts"
+
+
+def test_curated_test_units_caps_candidates_and_truncates_excerpts() -> None:
+    from app.prompts.prompt_sections import curated_test_units
+
+    units = [
+        BehavioralTestUnit(
+            file_path="tests/plans.spec.ts",
+            test_title=f"test {i}",
+            start_line=i * 10 + 1,
+            end_line=i * 10 + 5,
+            source_excerpt="x" * 700,
+        )
+        for i in range(30)
+    ]
+
+    curated = curated_test_units(units, max_units=25, excerpt_chars=600)
+
+    assert len(curated) == 26  # 25 units + omission note
+    assert curated[0]["source_excerpt"].endswith("… [truncated]")
+    assert len(curated[0]["source_excerpt"]) < 700
+    assert "5 lower-ranked candidate(s) omitted" in curated[25]["note"]
+
+
+def test_spec_placement_prompt_excludes_file_hashes() -> None:
+    from app.prompts.spec_placement_prompt import build_spec_placement_prompt
+    from app.schemas.repository_inventory import RepositoryInventory
+
+    prompt = build_spec_placement_prompt(
+        RepositoryInventory(
+            repo_path="/tmp/repo",
+            repo_head="abc",
+            file_hashes={"src/app.ts": "deadbeef"},
+        )
+    )
+
+    assert "file_hashes" not in prompt
+    assert "deadbeef" not in prompt
+
+
+def test_shallow_decision_trace_is_flagged_for_review() -> None:
+    from app.schemas.decision_trace import DecisionTrace
+
+    orchestrator = GenerationOrchestrator()
+    reasons: list[str] = []
+    orchestrator._flag_shallow_decision_trace(
+        "spec_placement", DecisionTrace(decision="undecided"), reasons
+    )
+    assert len(reasons) == 1
+    assert "decision trace lacks" in reasons[0]
+
+    reasons_missing_evidence: list[str] = []
+    orchestrator._flag_shallow_decision_trace(
+        "test_action",
+        DecisionTrace(decision="append_new_test", justification="same module"),
+        reasons_missing_evidence,
+    )
+    assert len(reasons_missing_evidence) == 1
+
+
+def test_complete_decision_trace_is_not_flagged() -> None:
+    from app.schemas.decision_trace import DecisionTrace
+
+    orchestrator = GenerationOrchestrator()
+    reasons: list[str] = []
+    orchestrator._flag_shallow_decision_trace(
+        "spec_placement",
+        DecisionTrace(
+            decision="extend_existing_spec",
+            justification="Existing spec owns the same route.",
+            evidence=["tests/plans.spec.ts covers /plans"],
+        ),
+        reasons,
+    )
+    assert reasons == []
+
+
 def test_log_format_includes_source_location_and_function() -> None:
     assert "%(filename)s" in LOG_FORMAT
     assert "%(lineno)d" in LOG_FORMAT
@@ -1378,3 +1517,21 @@ class FakeCritic:
         ui_context: PlaywrightUiContext,
     ) -> PatchSet:
         return patches
+
+
+def test_repo_strategy_bootstraps_unrecognized_framework_with_dev_script(tmp_path) -> None:
+    from app.services.repo_strategy_service import RepoStrategyService
+
+    # No Angular/React signal at all — just a runnable dev server script.
+    _write_package_json(
+        tmp_path,
+        dependencies={"some-internal-ui-kit": "^1.0.0"},
+        scripts={"dev": "vite"},
+    )
+    (tmp_path / "src").mkdir()
+
+    profile = RepoStrategyService().detect(str(tmp_path))
+
+    assert profile.support_status == "supported_with_warnings"
+    assert profile.requires_bootstrap is True
+    assert not profile.support_blockers

@@ -23,6 +23,7 @@ class TestGenerationAgent(BaseAgent):
         profile: RepoProfile,
         source_context: GenerationSourceContext | None = None,
         mock_stub_plan: MockStubPlan | None = None,
+        repo_understanding=None,
     ) -> TestCodeOutput:
         self.log_start(
             "generating_test_code",
@@ -37,6 +38,7 @@ class TestGenerationAgent(BaseAgent):
             strategy_guidance=strategy_guidance,
             source_context=source_context,
             mock_stub_plan=mock_stub_plan,
+            repo_understanding=repo_understanding,
         )
         try:
             output = self.complete_structured(prompt, TestCodeOutput)
@@ -68,6 +70,8 @@ class TestGenerationAgent(BaseAgent):
             strategy_reasons=strategy_match.reasons,
             warnings=[
                 *strategy_match.warnings,
-                "Used deterministic strategy fallback because model output was unavailable.",
+                "SCAFFOLD: deterministic strategy skeleton files were used because "
+                "model output was unavailable. These are placeholders, not real "
+                "coverage; manual review required.",
             ],
         )

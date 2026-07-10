@@ -17,6 +17,7 @@ class ApiTestValidator:
         generated_files: list[GeneratedFile],
         profile: RepoProfile | None = None,
         target: str = "ci",
+        execute: bool = False,
     ) -> ValidationResult:
         root = resolve_workspace_path(repo_path)
         missing = [file.path for file in generated_files if not (root / file.path).exists()]
@@ -31,7 +32,7 @@ class ApiTestValidator:
                 profile,
                 generated_files,
                 target=target,
-                execute=False,
+                execute=execute,
             )
             command_result.details = [
                 "Generated file existence check passed.",

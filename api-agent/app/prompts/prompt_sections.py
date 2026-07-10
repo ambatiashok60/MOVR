@@ -1,8 +1,154 @@
 from __future__ import annotations
 
+import json
+from typing import Any
+
+from pydantic import BaseModel
+
 from app.schemas.repo_profile import RepoProfile
 from app.schemas.mock_stub_plan import MockStubPlan
 from app.schemas.source_context import GenerationSourceContext
+
+
+def response_contract(response_model: type[BaseModel]) -> str:
+    """Schema-derived response contract with canonical examples.
+
+    Keeps prompts and Pydantic schemas from drifting apart: the JSON schema is
+    generated from the model itself, and known models carry a valid/invalid
+    example pair so the model never has to guess the shape.
+    """
+    schema = response_model.model_json_schema()
+    examples = _response_examples(response_model.__name__)
+    return (
+        "Return only valid JSON. Do not include markdown fences or prose.\n"
+        "Return exactly one JSON object that validates against this Pydantic "
+        f"model: {response_model.__name__}.\n"
+        "Use only fields from the schema. Do not invent extra keys. Populate "
+        "every required field.\n\n"
+        f"{examples}"
+        "JSON schema:\n"
+        f"{json.dumps(schema, indent=2)}"
+    )
+
+
+def _response_examples(model_name: str) -> str:
+    examples: dict[str, tuple[Any, Any]] = {
+        "ScenarioPlanOutput": (
+            {
+                "scenarios": [
+                    {
+                        "api_scenario_id": "create-order-happy-path-ci",
+                        "scenario_name": "Create order succeeds with valid payload",
+                        "scenario_type": "positive",
+                        "service_name": "OrderService",
+                        "method": "POST",
+                        "endpoint": "/api/orders",
+                        "priority": "high",
+                        "execution_target": "ci",
+                        "reason": "Fast deterministic contract check belongs in PR CI.",
+                        "scenario_steps": [
+                            "Build a valid order payload from the acceptance criteria.",
+                            "POST it to /api/orders through the controller layer.",
+                            "Verify the created response contract.",
+                        ],
+                        "assertions": [
+                            "Response status is 201",
+                            "Response body contains the new order id",
+                        ],
+                    }
+                ],
+                "warnings": [],
+            },
+            {
+                "scenarios": [
+                    {
+                        "scenario_name": "some test",
+                        "scenario_type": "smoke",
+                        "method": "post",
+                    }
+                ]
+            },
+        ),
+        "TestCodeOutput": (
+            {
+                "files": [
+                    {
+                        "relative_path": "src/test/java/com/acme/orders/OrderControllerTest.java",
+                        "content": "package com.acme.orders;\n\nimport org.junit.jupiter.api.Test;\n// full compiling test file content here\n",
+                        "test_target": "ci",
+                        "summary": "MockMvc test proving order creation contract",
+                    }
+                ],
+                "summary": "Generated CI MockMvc coverage for order creation",
+                "warnings": [],
+            },
+            {
+                "files": [
+                    {
+                        "relative_path": "src/main/java/com/acme/orders/OrderService.java",
+                        "content": "// raw code fragment",
+                        "test_target": "pr",
+                    }
+                ]
+            },
+        ),
+    }
+    examples["DiscoveryTurn"] = (
+        {
+            "requests": [
+                {"kind": "read_file", "target": "package.json"},
+                {"kind": "search", "target": "supertest"},
+                {"kind": "list_dir", "target": "tests"},
+            ],
+            "understanding": None,
+        },
+        {"requests": ["read package.json"], "understanding": "looks like node"},
+    )
+    if model_name not in examples:
+        return (
+            "No canonical example is available for this schema. Follow the JSON "
+            "schema exactly; populate every required field.\n\n"
+        )
+    valid, invalid = examples[model_name]
+    return (
+        "Valid response example:\n"
+        f"{json.dumps(valid, indent=2)}\n\n"
+        "Invalid response example (do not do this):\n"
+        f"{json.dumps(invalid, indent=2)}\n\n"
+    )
+
+
+def render_repo_understanding(understanding: Any | None) -> str:
+    """Discovered (model-explored) repository understanding for prompts.
+
+    When present this outranks the scanner-derived profile and the generic
+    strategy guidance: it is evidence the model itself read from the repo.
+    """
+    if understanding is None:
+        return "Discovered repository understanding: none (fall back to the scanned profile)."
+    conventions = "\n".join(f"- {item}" for item in understanding.conventions)
+    examples = "\n".join(f"- {item}" for item in understanding.example_test_paths)
+    risks = "\n".join(f"- {item}" for item in understanding.risks)
+    return f"""
+Discovered repository understanding (model-explored evidence; prefer this over
+generic strategy guidance when they disagree):
+- languages: {', '.join(understanding.languages) or 'unknown'}
+- service frameworks: {', '.join(understanding.service_frameworks) or 'unknown'}
+- test frameworks: {', '.join(understanding.test_frameworks) or 'unknown'}
+- test locations: {', '.join(understanding.test_locations) or 'unknown'}
+- CI test command: {understanding.ci_test_command or 'unknown'}
+- stage test command: {understanding.stage_test_command or 'unknown'}
+- confidence: {understanding.confidence}
+
+Conventions observed:
+{conventions or '- none recorded'}
+
+Example tests to imitate:
+{examples or '- none recorded'}
+
+Risks:
+{risks or '- none'}
+""".strip()
 
 
 def render_repo_profile(profile: RepoProfile) -> str:

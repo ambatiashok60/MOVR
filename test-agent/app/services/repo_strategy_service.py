@@ -82,6 +82,7 @@ class RepoStrategyService:
                     is_monorepo=is_monorepo,
                     app_roots=app_roots,
                     validation_commands=validation_commands,
+                    package_scripts=package_scripts,
                 )
             )
             profile = RepoProfile(
@@ -282,6 +283,7 @@ class RepoStrategyService:
         is_monorepo: bool,
         app_roots: list[str],
         validation_commands: list[str],
+        package_scripts: dict[str, Any] | None = None,
     ) -> tuple[str, bool, list[str], list[str], list[str]]:
         reasons: list[str] = []
         warnings: list[str] = []
@@ -301,12 +303,18 @@ class RepoStrategyService:
         # is scaffolded during generation. Bootstrap requires a recognizable beta
         # frontend and no competing test framework; otherwise the original blockers
         # stand.
+        # Eligibility is discovery-driven, not framework-hardcoded: any detected
+        # frontend framework qualifies, and so does a repo whose package scripts
+        # show a runnable dev server (start/dev/serve) even when the framework is
+        # not one we recognize.
+        scripts = package_scripts or {}
+        has_dev_server_script = any(name in scripts for name in ("start", "dev", "serve"))
         playwright_missing = not configs and not spec_files
         bootstrap_eligible = (
             playwright_missing
             and package_json_exists
             and not unsupported_signals
-            and any(framework in {"angular", "react"} for framework in frameworks)
+            and (bool(frameworks) or has_dev_server_script)
         )
         if bootstrap_eligible:
             requires_bootstrap = True

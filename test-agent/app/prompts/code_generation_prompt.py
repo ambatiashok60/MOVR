@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.prompts.prompt_sections import (
     as_json,
+    curated_ui_context,
     playwright_best_practices,
     response_contract,
 )
@@ -81,7 +82,7 @@ Locator decisions (evidence-grounded, use these exact locators):
 {as_json([decision.model_dump() for decision in (locator_decisions or [])])}
 
 Playwright UI context:
-{as_json(ui_context or {})}
+{as_json(curated_ui_context(ui_context))}
 
 {response_contract(PatchSet)}
 """
