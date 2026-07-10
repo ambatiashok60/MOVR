@@ -73,6 +73,14 @@ class BaseAgent:
                 f"{evidence}\n\n{closing}\n\n{response_contract(turn_model)}"
             )
             turn = self.complete_structured(prompt, turn_model)
+            log_step(
+                f"{self.agent_name}_exploration_turn",
+                {
+                    "turn": turn_index + 1,
+                    "concluded": turn.output is not None,
+                    "requests": [f"{r.kind}:{r.target}" for r in turn.requests][:8],
+                },
+            )
             if turn.output is not None:
                 log_step(
                     f"{self.agent_name}_exploration_concluded",

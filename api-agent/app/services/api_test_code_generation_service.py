@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.agents.test_generation_agent import TestGenerationAgent
 from app.config import settings
+from app.utils.logging_utils import log_step
 from app.schemas.api_test_generation_request import GenerateApiTestCodeRequest
 from app.schemas.api_test_generation_result import ApiTestGenerationResult
 from app.schemas.mock_stub_plan import MockStubPlan
@@ -136,7 +137,15 @@ class ApiTestCodeGenerationService:
                 mock_stub_plan=mock_stub_plan,
             )
             warnings.extend(guard_warnings)
-            if output.files:
+            mock_gap = any("Mock emission gap" in reason for reason in guard_reasons)
+            if mock_gap and attempt < attempts:
+                # Missing stubs make CI tests hit real services — important enough
+                # to force a healing round rather than ship flagged.
+                log_step(
+                    "guard_repair_triggered",
+                    {"attempt": attempt + 1, "cause": "mock_emission_gap"},
+                )
+            elif output.files:
                 if attempt > 0:
                     warnings.append(
                         f"Self-healing succeeded on attempt {attempt + 1}: the model "

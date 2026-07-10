@@ -527,3 +527,41 @@ def test_mock_emission_gap_flagged(tmp_path) -> None:
         mock_stub_plan=plan,
     )
     assert not any("Mock emission gap" in r for r in reasons2)
+
+
+def test_mock_emission_gap_triggers_healing_regeneration(tmp_path) -> None:
+    from app.schemas.mock_stub_plan import MockStubPlan
+
+    plan = MockStubPlan.model_validate(
+        {"dependencies_to_mock": [{"name": "PaymentClient", "dependency_kind": "client",
+                                   "source_file": "src/x.java", "reason": "downstream"}]}
+    )
+
+    class HealingMockAgent:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def generate(self, request, profile, source_context=None,
+                     mock_stub_plan=None, repo_understanding=None):
+            self.calls += 1
+            if self.calls == 1:  # safe file but no mocks
+                return TestCodeOutput(
+                    files=[_file("src/test/java/com/acme/OrderControllerTest.java")]
+                )
+            return TestCodeOutput(  # healed: mocks the dependency
+                files=[_file(
+                    "src/test/java/com/acme/OrderControllerTest.java",
+                    content=JAVA_TEST.replace(
+                        "class OrderTest {", "@MockBean PaymentClient pc;\nclass OrderTest {"
+                    ),
+                )]
+            )
+
+    agent = HealingMockAgent()
+    service = ApiTestCodeGenerationService(agent)
+    result = service.generate(
+        "t1", _code_request(repo_path=str(tmp_path)),
+        _profile(repo_path=str(tmp_path)), mock_stub_plan=plan,
+    )
+    assert agent.calls == 2  # gap forced a regeneration round
+    assert not any("Mock emission gap" in r for r in result.review_reasons)

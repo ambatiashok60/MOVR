@@ -92,6 +92,8 @@ class GeneratedFileGuard:
                 "input_files": len(output.files),
                 "kept_files": len(kept),
                 "rejected_files": len(output.files) - len(kept),
+                "kept_paths": [file.relative_path for file in kept],
+                "reasons": review_reasons[:10],
             },
         )
         guarded = output.model_copy(update={"files": kept})

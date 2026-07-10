@@ -20,6 +20,23 @@ class RepoExplorer:
     """
 
     def execute(self, root: Path, request) -> str:
+        from app.utils.logging_utils import log_step
+
+        try:
+            result = self._dispatch(root, request)
+            log_step(
+                "repo_explorer_operation",
+                {"kind": request.kind, "target": request.target, "result_chars": len(result)},
+            )
+            return result
+        except Exception as exc:
+            log_step(
+                "repo_explorer_operation_failed",
+                {"kind": request.kind, "target": request.target, "error": str(exc)},
+            )
+            return f"### {request.kind} {request.target}\nerror: {exc}"
+
+    def _dispatch(self, root: Path, request) -> str:
         try:
             if request.kind == "read_file":
                 return f"### read_file {request.target}\n{self.read_file(root, request.target)}"
