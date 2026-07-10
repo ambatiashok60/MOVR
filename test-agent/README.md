@@ -588,10 +588,10 @@ one-shot calls: each runs a bounded exploration loop (own `RepoExplorer` +
 `complete_with_exploration`, zero code shared with api-agent). The model must
 state `reasoning` every turn and a `reason` for every file it requests before
 reading candidate specs, actual test blocks, or page objects — all logged, so
-the decision trail is reconstructable at every level. With
-`enable_targeted_runtime=true`, changed specs are actually executed and the
-existing rollback+repair loop converges on a green run (`max_repair_attempts`
-now defaults to 2).
+the decision trail is reconstructable at every level. Running the
+generated Playwright tests is intentionally out of scope for now: validation is
+static (discovery, structure, quality heuristics) and the repair loop converges
+on those signals.
 
 ### Old vs new at a glance
 

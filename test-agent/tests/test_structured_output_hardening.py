@@ -1572,24 +1572,3 @@ def test_spec_placement_agent_explores_before_deciding(tmp_path) -> None:
     )
     assert agent.llm.calls == 2
     assert decision.target_spec_file == "tests/plans.spec.ts"
-
-
-def test_targeted_execution_disabled_by_default() -> None:
-    from app.validation.repo_command_validator import RepoCommandValidator
-
-    check = RepoCommandValidator()._execution_check("/tmp/repo", None, None)
-    assert check.passed is True
-    assert "disabled" in check.output
-
-
-def test_targeted_execution_runs_command_when_enabled(tmp_path, monkeypatch) -> None:
-    from app.config import settings as cfg
-    from app.schemas.playwright_ui_context import CiCommandEvidence
-    from app.validation.repo_command_validator import RepoCommandValidator
-
-    monkeypatch.setattr(cfg, "enable_targeted_runtime", True)
-    ui = PlaywrightUiContext(ci_commands=[CiCommandEvidence(command="echo playwright-run &&false")])
-    patches = PatchSet(patches=[CodePatch(path="e2e/x.spec.ts", operation="create", content="x")])
-    ui.ci_commands[0].command = "false # playwright"
-    check = RepoCommandValidator()._execution_check(str(tmp_path), patches, ui)
-    assert check.passed is False  # failing command surfaces as failed validation
