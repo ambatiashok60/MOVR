@@ -1,15 +1,22 @@
 from __future__ import annotations
 
-from app.prompts.prompt_sections import as_json, response_contract
+from app.prompts.prompt_sections import (
+    as_json,
+    curated_test_units,
+    curated_ui_context,
+    response_contract,
+)
 from app.schemas.behavioral_test_unit import BehavioralTestUnit
 from app.schemas.playwright_ui_context import PlaywrightUiContext
 from app.schemas.spec_placement import SpecPlacementDecision
+from app.schemas.test_action_decision import TestActionDecision
 
 
 def build_test_action_prompt(
     placement: SpecPlacementDecision,
     ranked_tests: list[BehavioralTestUnit],
     ui_context: PlaywrightUiContext | None = None,
+    include_contract: bool = True,
 ) -> str:
     return f"""
 You are deciding whether to extend, append, or create Playwright coverage.
@@ -26,10 +33,10 @@ Spec placement:
 {as_json(placement)}
 
 Ranked candidate tests:
-{as_json(ranked_tests)}
+{as_json(curated_test_units(ranked_tests))}
 
 Playwright UI context:
-{as_json(ui_context or {})}
+{as_json(curated_ui_context(ui_context))}
 
-{response_contract("TestActionDecision")}
+{response_contract(TestActionDecision) if include_contract else ''}
 """

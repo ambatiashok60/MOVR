@@ -87,6 +87,77 @@ frontend/test-generation/
 It is not wired into the real Worktop Test Generation page yet because that
 host page is not present in this repository snapshot.
 
+## Generation Hardening
+
+The backend follows the same hardening standards as `test-agent` (see that
+repo's "Decision Intelligence Hardening" section): typed contracts and
+deterministic guards around every LLM output, plus a review signal on results.
+
+### Typed contracts
+
+- `ApiScenario.scenario_type` / `priority` / `method` and
+  `GeneratedTestFileOutput.test_target` are `Literal` types — out-of-vocabulary
+  model output fails validation and routes to the repair/fallback path instead
+  of flowing downstream. `GeneratedFile.operation` is `created|updated`.
+- Both results (`ApiScenarioGenerationResult`, `ApiTestGenerationResult`) carry
+  `needs_review` + `review_reasons` populated by the guards.
+
+### LLM adapter robustness
+
+`WorktopModelClientAdapter.complete_structured` extracts JSON from fenced or
+prose-wrapped responses and performs one repair retry (re-prompting with the
+Pydantic validation error and schema) before raising to the deterministic
+fallbacks.
+
+### Schema-derived prompt contracts
+
+Prompts no longer hand-write the JSON shape (which could drift from the
+schemas): `response_contract()` in `app/prompts/prompt_sections.py` renders the
+Pydantic JSON schema plus canonical valid/invalid examples for
+`ScenarioPlanOutput` and `TestCodeOutput`.
+
+### Scenario plan guard
+
+Deterministic post-generation checks: duplicate scenario ids and scenarios with
+no steps or no assertions are dropped with warnings; scenarios targeting an
+endpoint that matches nothing detected in the repository still ship but are
+flagged in `review_reasons`.
+
+### Generated-file write guard (safety critical)
+
+The LLM controls `relative_path`, so before writing, `GeneratedFileGuard`
+enforces: the path must be provably a test file (detected team test locations
+or per-language test naming — `src/test/`, `*Test.java`, `test_*.py`, …); it
+must never land on application source; content must be non-empty with a
+test-framework signal and at least one assertion; `test_target` must match the
+requested execution target. Rejected files are dropped with review reasons, and
+if nothing survives, deterministic strategy skeleton files are written instead
+of unsafe model output.
+
+### Agentic core (repo-agnostic, Codex/Claude Code style)
+
+- **Model-directed discovery loop.** `RepoDiscoveryAgent` explores the
+  repository itself: each turn it requests `read_file` / `search` / `list_dir`
+  (bounded and sandboxed), reads the results, and repeats until it emits an
+  evidence-grounded `RepoUnderstanding` (languages, test frameworks, locations,
+  CI/stage commands, conventions, example tests — any stack, nothing
+  hardcoded). The understanding outranks the scanner profile and the strategy
+  registry, which is demoted to a hint.
+- **Convention-derived guards.** Test-likeness in the write guard comes from
+  the repo's own detected test locations and existing test directories first;
+  per-language heuristics are only the last-resort universal check.
+- **Scaffolds never masquerade as coverage.** Deterministic fallback scenarios
+  and skeleton files are explicitly marked `SCAFFOLD`, and any scaffold output
+  forces `needs_review` with a "not real coverage" review reason.
+- **Guard-repair self-healing.** When the write guard rejects generated
+  files, the findings are fed back to the model and it regenerates (bounded by
+  `max_generation_repair_attempts`); scaffold skeletons are only the very last
+  resort after healing fails.
+- **Env-gated execution feedback loop.** With `enable_test_execution=true`, the
+  resolved repo test command actually runs; on failure the output is fed back
+  to the model for a bounded repair round (regenerate → guard → rewrite →
+  re-run). Off by default so environments without repo dependencies still work.
+
 ## Implementation Phases
 
 ### Phase 1: Backend Strategy Foundation

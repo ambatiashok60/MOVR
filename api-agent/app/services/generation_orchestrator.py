@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from app.agents.repo_discovery_agent import RepoDiscoveryAgent
 from app.agents.scenario_agent import ScenarioAgent
 from app.agents.test_generation_agent import TestGenerationAgent
 from app.errors import AbortRequestedError
@@ -61,9 +62,17 @@ class GenerationOrchestrator:
             )
 
             self._check_abort(task_id, is_abort_requested)
+            publish(
+                "discovering_repository",
+                "Exploring repository conventions with the discovery agent",
+                None,
+            )
+            repo_understanding = self._discover(runtime, request.repo_path)
+
+            self._check_abort(task_id, is_abort_requested)
             publish("generating_scenarios", "Generating API test scenarios", None)
             service = ApiScenarioGenerationService(ScenarioAgent(runtime.llm_client))
-            result = service.generate(task_id, request, profile)
+            result = service.generate(task_id, request, profile, repo_understanding)
 
             publish(
                 "completed",
@@ -123,6 +132,14 @@ class GenerationOrchestrator:
             )
 
             self._check_abort(task_id, is_abort_requested)
+            publish(
+                "discovering_repository",
+                "Exploring repository conventions with the discovery agent",
+                None,
+            )
+            repo_understanding = self._discover(runtime, request.repo_path)
+
+            self._check_abort(task_id, is_abort_requested)
             publish("selecting_generation_strategy", "Selecting repository-native generation strategy", None)
 
             self._check_abort(task_id, is_abort_requested)
@@ -134,6 +151,7 @@ class GenerationOrchestrator:
                 profile,
                 source_context=source_context,
                 mock_stub_plan=mock_stub_plan,
+                repo_understanding=repo_understanding,
             )
 
             self._check_abort(task_id, is_abort_requested)
@@ -171,6 +189,14 @@ class GenerationOrchestrator:
         except Exception as exc:
             log_exception(exc, context=context)
             raise
+
+    def _discover(self, runtime: GenerationRuntime, repo_path: str):
+        """Best-effort model-directed discovery; failure never blocks generation."""
+        try:
+            return RepoDiscoveryAgent(runtime.llm_client).discover(repo_path)
+        except Exception as exc:
+            log_exception(exc, context={"stage": "repo_discovery", "repo_path": repo_path})
+            return None
 
     def _check_abort(self, task_id: str, is_abort_requested: AbortCheck) -> None:
         if is_abort_requested():

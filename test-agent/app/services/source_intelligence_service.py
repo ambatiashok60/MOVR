@@ -1,17 +1,7 @@
 from __future__ import annotations
 
-from typing import Any
+import logging
 
-from worktop.core_services.app.utility.custom_logger.log_helpers import (
-    log_card_simple,
-    log_exception,
-    log_metric,
-    log_step,
-)
-from worktop.core_services.app.utility.custom_logger.logging import (
-    log_performance,
-    logger,
-)
 
 from app.agents.source_mapper_agent import SourceMapperAgent
 from app.llm.llm_client import LLMClient
@@ -19,20 +9,33 @@ from app.schemas.functional_intent import FunctionalIntent
 from app.schemas.playwright_ui_context import PlaywrightUiContext
 from app.schemas.source_intelligence import SourceIntelligence
 
+logger = logging.getLogger(__name__)
+
 
 class SourceIntelligenceService:
     def __init__(self, llm_client: LLMClient | None = None) -> None:
         self.agent = SourceMapperAgent(llm_client=llm_client)
 
-    @log_performance("source_intelligence_service.map")
     def map(
         self,
         intent: FunctionalIntent,
         ui_context: PlaywrightUiContext | None = None,
     ) -> SourceIntelligence:
-        log_step("source_intelligence_started", {"capability": intent.capability})
+        logger.info(
+            "[playwright-generation] stage=source_intelligence status=started capability=%s",
+            intent.capability,
+        )
         try:
-            return self.agent.map(intent, ui_context)
+            source = self.agent.map(intent, ui_context)
+            logger.info(
+                "[playwright-generation] stage=source_intelligence status=completed components=%s locators=%s",
+                len(source.components),
+                len(source.locator_evidence),
+            )
+            return source
         except Exception as exc:
-            log_exception(exc, context={"stage": "source_intelligence"})
+            logger.exception(
+                "[playwright-generation] stage=source_intelligence status=failed error=%s",
+                exc,
+            )
             raise

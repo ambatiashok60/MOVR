@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.prompts.prompt_sections import as_json, response_contract
+from app.schemas.locator_decision import LocatorDecisionSet
 from app.schemas.source_intelligence import SourceIntelligence
 
 
@@ -16,5 +17,5 @@ Rules:
 Source intelligence:
 {as_json(source)}
 
-{response_contract("LocatorDecisionSet")}
+{response_contract(LocatorDecisionSet)}
 """

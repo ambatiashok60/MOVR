@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import subprocess
+
+from app.config import settings
 from app.schemas.generated_file import GeneratedFile
 from app.schemas.repo_profile import RepoProfile
 from app.schemas.validation_result import ValidationResult
@@ -38,9 +41,42 @@ class RepoCommandValidator:
                 summary="Validation command resolved",
                 details=details,
             )
+        return self._execute(command, profile.repo_path, details)
+
+    def _execute(
+        self,
+        command: str,
+        repo_path: str,
+        details: list[str],
+    ) -> ValidationResult:
+        try:
+            completed = subprocess.run(
+                command,
+                shell=True,
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                timeout=settings.execution_timeout_seconds,
+            )
+        except subprocess.TimeoutExpired:
+            return ValidationResult(
+                passed=False,
+                command=command,
+                summary="Validation command timed out",
+                details=[*details, f"Timed out after {settings.execution_timeout_seconds}s"],
+            )
+        except OSError as exc:
+            return ValidationResult(
+                passed=False,
+                command=command,
+                summary="Validation command could not be executed",
+                details=[*details, str(exc)],
+            )
+        output_tail = (completed.stdout + "\n" + completed.stderr)[-6000:]
+        passed = completed.returncode == 0
         return ValidationResult(
-            passed=False,
+            passed=passed,
             command=command,
-            summary="Command execution is not enabled yet",
-            details=details,
+            summary="Tests executed and passed" if passed else "Test execution failed",
+            details=[*details, f"exit code: {completed.returncode}", output_tail.strip()],
         )

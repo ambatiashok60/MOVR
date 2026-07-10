@@ -1,20 +1,12 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
-from typing import Any
 
-from worktop.core_services.app.utility.custom_logger.log_helpers import (
-    log_card_simple,
-    log_exception,
-    log_metric,
-    log_step,
-)
-from worktop.core_services.app.utility.custom_logger.logging import (
-    log_performance,
-    logger,
-)
 
 from app.schemas.test_file_classification import TestFileClassification
+
+logger = logging.getLogger(__name__)
 
 
 class TestFileClassifierService:
@@ -31,18 +23,41 @@ class TestFileClassifierService:
         ".playwright.tsx",
     )
 
-    @log_performance("test_file_classifier_service.classify")
     def classify(self, repo_path: str) -> list[TestFileClassification]:
-        log_step("test_file_classification_started", {"repo_path": repo_path})
+        logger.info(
+            "[playwright-generation] stage=test_file_classification status=started repo=%s",
+            repo_path,
+        )
         try:
             root = Path(repo_path)
             files = []
+            scanned = 0
+            ignored = 0
+            typed = 0
             for path in root.rglob("*"):
-                if not path.is_file() or path.suffix not in {".ts", ".tsx"}:
+                scanned += 1
+                if not path.is_file():
                     continue
                 if self._is_ignored_path(path):
+                    ignored += 1
+                    logger.debug(
+                        "[playwright-generation] stage=test_file_classification "
+                        "status=skipped_ignored path=%s",
+                        path,
+                    )
                     continue
+                if path.suffix not in {".ts", ".tsx"}:
+                    continue
+                typed += 1
                 kind, is_e2e_candidate, reason = self._classify_file(path)
+                logger.debug(
+                    "[playwright-generation] stage=test_file_classification "
+                    "status=classified path=%s kind=%s e2e_candidate=%s reason=%s",
+                    path.relative_to(root),
+                    kind,
+                    is_e2e_candidate,
+                    reason,
+                )
                 files.append(
                     TestFileClassification(
                         path=str(path.relative_to(root)),
@@ -51,11 +66,22 @@ class TestFileClassifierService:
                         reason=reason,
                     )
                 )
-            log_metric("classified_test_files_count", len(files))
-            logger.info("Test file classification completed")
+            logger.info(
+                "[playwright-generation] stage=test_file_classification status=completed "
+                "scanned=%s ignored=%s ts_files=%s classified=%s e2e_candidates=%s",
+                scanned,
+                ignored,
+                typed,
+                len(files),
+                sum(1 for item in files if item.is_e2e_candidate),
+            )
             return files
         except Exception as exc:
-            log_exception(exc, context={"repo_path": repo_path, "stage": "test_file_classification"})
+            logger.exception(
+                "[playwright-generation] stage=test_file_classification status=failed repo=%s error=%s",
+                repo_path,
+                exc,
+            )
             raise
 
     def _classify_file(self, path: Path) -> tuple[str, bool, str]:

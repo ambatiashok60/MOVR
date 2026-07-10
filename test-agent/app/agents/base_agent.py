@@ -1,24 +1,7 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, TypeVar
-
-from worktop.core_services.app.gen_ai_models.model_client_factory import (
-    ModelClientFactory,
-)
-from worktop.core_services.app.dao.models_config_dao import (
-    ModelsConfigurationDAO,
-)
-from worktop.core_services.app.utility.common_utils import CommonUtils
-from worktop.core_services.app.utility.custom_logger.log_helpers import (
-    log_card_simple,
-    log_exception,
-    log_metric,
-    log_step,
-)
-from worktop.core_services.app.utility.custom_logger.logging import (
-    log_performance,
-    logger,
-)
 
 try:
     from worktop.core_services.app.models.llm_telemetry import (
@@ -37,6 +20,9 @@ except ImportError:
 from app.utils.logging_utils import build_log_context
 
 ResponseModel = TypeVar("ResponseModel")
+logger = logging.getLogger(__name__)
+
+__all__ = ["BaseAgent", "logger"]
 
 
 class BaseAgent:
@@ -47,11 +33,21 @@ class BaseAgent:
 
     def log_start(self, stage: str, **metadata: Any) -> dict[str, Any]:
         context = build_log_context(stage=stage, agent_name=self.agent_name, **metadata)
-        log_step(f"{self.agent_name}_started", context)
+        logger.info(
+            "[playwright-generation] agent=%s stage=%s status=started context=%s",
+            self.agent_name,
+            stage,
+            context,
+        )
         return context
 
     def log_decision(self, title: str, message: str, **metadata: Any) -> None:
-        log_card_simple(title=title, message=message, metadata=metadata)
+        logger.info(
+            "[playwright-generation] decision=%s message=%s metadata=%s",
+            title,
+            message,
+            metadata,
+        )
 
     def complete_structured(
         self,
@@ -66,5 +62,60 @@ class BaseAgent:
         try:
             return self.llm.complete_structured(prompt=prompt, response_model=response_model)
         except Exception as exc:
-            log_exception(exc, context={"stage": "llm_structured_completion", "agent_name": self.agent_name})
+            logger.exception(
+                "[playwright-generation] agent=%s stage=llm_structured_completion status=failed error=%s",
+                self.agent_name,
+                exc,
+            )
             raise
+
+
+    def complete_with_exploration(
+        self,
+        base_prompt: str,
+        turn_model: type[ResponseModel],
+        repo_path: str,
+        max_turns: int = 4,
+        max_requests_per_turn: int = 4,
+    ) -> ResponseModel:
+        """Agentic tool loop: gather repo evidence, state reasoning, then conclude.
+
+        Each turn the model must explain its reasoning and either request
+        evidence (read_file/search/list_dir, sandboxed) or return the final
+        decision. Every request carries a reason; everything is logged so the
+        decision trail is reconstructable at all levels.
+        """
+        from app.prompts.prompt_sections import response_contract
+        from app.tools.repo_explorer_tool import RepoExplorer
+
+        explorer = RepoExplorer(repo_path)
+        transcript: list[str] = []
+        for turn_index in range(max_turns):
+            final = turn_index == max_turns - 1
+            closing = (
+                "This is your final turn: you MUST return `output` now, with your reasoning."
+                if final
+                else "State `reasoning`, then request evidence via `requests` or return `output`."
+            )
+            evidence = "\n\n".join(transcript[-16:]) or "(none gathered yet)"
+            prompt = (
+                f"{base_prompt}\n\nEvidence gathered from the repository so far:\n"
+                f"{evidence}\n\n{closing}\n\n{response_contract(turn_model)}"
+            )
+            turn = self.complete_structured(prompt, turn_model)
+            logger.info(
+                "[playwright-generation] agent=%s stage=exploration turn=%s concluded=%s "
+                "reasoning=%s requests=%s",
+                self.agent_name,
+                turn_index + 1,
+                turn.output is not None,
+                (turn.reasoning or "unstated")[:400],
+                [f"{r.kind}:{r.target}" for r in turn.requests][:8],
+            )
+            if turn.output is not None:
+                return turn.output
+            if not turn.requests:
+                break
+            for request in turn.requests[:max_requests_per_turn]:
+                transcript.append(explorer.execute(request))
+        raise RuntimeError(f"{self.agent_name} exploration ended without output")

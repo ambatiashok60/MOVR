@@ -3,7 +3,7 @@ from __future__ import annotations
 from app.agents.base_agent import BaseAgent
 from app.prompts.api_test_code_prompt import build_api_test_code_prompt
 from app.schemas.api_test_generation_request import GenerateApiTestCodeRequest
-from app.schemas.llm_outputs import TestCodeOutput
+from app.schemas.llm_outputs import TestCodeOutput, TestCodeTurn
 from app.schemas.mock_stub_plan import MockStubPlan
 from app.schemas.repo_profile import RepoProfile
 from app.schemas.source_context import GenerationSourceContext
@@ -23,6 +23,7 @@ class TestGenerationAgent(BaseAgent):
         profile: RepoProfile,
         source_context: GenerationSourceContext | None = None,
         mock_stub_plan: MockStubPlan | None = None,
+        repo_understanding=None,
     ) -> TestCodeOutput:
         self.log_start(
             "generating_test_code",
@@ -37,9 +38,18 @@ class TestGenerationAgent(BaseAgent):
             strategy_guidance=strategy_guidance,
             source_context=source_context,
             mock_stub_plan=mock_stub_plan,
+            repo_understanding=repo_understanding,
+            include_contract=False,
+        )
+        prompt += (
+            "\n\nBefore concluding, read any source you are about to reference "
+            "(DTOs, controllers, helpers, fixtures) so every field name, import, "
+            "and helper call in the generated tests is real, not guessed."
         )
         try:
-            output = self.complete_structured(prompt, TestCodeOutput)
+            output = self.complete_with_exploration(
+                prompt, TestCodeTurn, request.repo_path
+            )
         except Exception:
             output = self._fallback_code(request, profile, strategy_match)
         if output.files:
@@ -68,6 +78,8 @@ class TestGenerationAgent(BaseAgent):
             strategy_reasons=strategy_match.reasons,
             warnings=[
                 *strategy_match.warnings,
-                "Used deterministic strategy fallback because model output was unavailable.",
+                "SCAFFOLD: deterministic strategy skeleton files were used because "
+                "model output was unavailable. These are placeholders, not real "
+                "coverage; manual review required.",
             ],
         )

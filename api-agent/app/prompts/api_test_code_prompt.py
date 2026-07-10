@@ -3,8 +3,12 @@ from __future__ import annotations
 from app.prompts.prompt_sections import (
     render_mock_stub_plan,
     render_repo_profile,
+    render_repo_understanding,
     render_source_context,
+    response_contract,
 )
+from app.schemas.llm_outputs import TestCodeOutput
+from app.schemas.repo_understanding import RepoUnderstanding
 from app.schemas.api_test_generation_request import GenerateApiTestCodeRequest
 from app.schemas.mock_stub_plan import MockStubPlan
 from app.schemas.repo_profile import RepoProfile
@@ -17,28 +21,18 @@ def build_api_test_code_prompt(
     strategy_guidance: str | None = None,
     source_context: GenerationSourceContext | None = None,
     mock_stub_plan: MockStubPlan | None = None,
+    repo_understanding: RepoUnderstanding | None = None,
+    include_contract: bool = True,
 ) -> str:
     steps = "\n".join(f"- {step}" for step in request.scenario_steps)
     assertions = "\n".join(f"- {assertion}" for assertion in request.assertions)
     return f"""
 You are generating repository-native API tests for an active sprint ticket.
 
-Return strict JSON with this shape:
-{{
-  "files": [
-    {{
-      "relative_path": "path/from/repo/root/TestFile.java",
-      "content": "full file contents",
-      "test_target": "ci|stage",
-      "summary": "what this file covers"
-    }}
-  ],
-  "summary": "short generation summary",
-  "warnings": []
-}}
-
 Rules:
 - Write tests into the repository's existing API test conventions when detectable.
+- relative_path must be a test file inside the repository's test tree; never write to application source paths.
+- Never overwrite application source files; only create or update test files.
 - CI tests must be fast and deterministic.
 - Stage tests may target deployed endpoints and integration behavior.
 - Use clear assertions for status, response body, and error handling.
@@ -49,8 +43,15 @@ Rules:
 - Reuse detected fixture/auth/client helpers where possible.
 - Generate or configure mocks/stubs for controller dependencies and downstream clients when needed.
 - Prefer modifying/adding the smallest number of files required for a compiling useful test.
+- Every dependency the mock/stub plan marks for mocking MUST actually be mocked or stubbed in CI tests.
+- Spring WebClient: never deep-stub the fluent chain with Mockito; use MockWebServer or WireMock (or the repo's existing idiom).
+- RestAssured CI tests: boot the app (@SpringBootTest RANDOM_PORT) and stub downstream dependencies with WireMock or @MockBean/@MockitoBean.
+- Stage tests: no mocks or stubs; use the repo's real auth/config helpers against the deployed environment.
 
-Selected strategy guidance:
+{render_repo_understanding(repo_understanding)}
+
+Selected strategy guidance (a hint only — the discovered understanding and the
+repository's own conventions win when they disagree):
 {strategy_guidance or 'Use the best repository-native strategy from the profile.'}
 
 Scenario:
@@ -75,4 +76,6 @@ Additional context:
 {render_source_context(source_context)}
 
 {render_mock_stub_plan(mock_stub_plan)}
+
+{response_contract(TestCodeOutput) if include_contract else ''}
 """.strip()

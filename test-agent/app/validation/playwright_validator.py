@@ -1,20 +1,14 @@
 from __future__ import annotations
 
+import logging
 from collections import Counter
 from pathlib import Path
 
-from worktop.core_services.app.utility.custom_logger.log_helpers import (
-    log_exception,
-    log_metric,
-    log_step,
-)
-from worktop.core_services.app.utility.custom_logger.logging import (
-    log_performance,
-    logger,
-)
 
 from app.schemas.validation_result import ValidationCheck
 from app.tools.playwright_parser_tool import PlaywrightParserTool
+
+logger = logging.getLogger(__name__)
 
 
 class PlaywrightValidator:
@@ -34,9 +28,11 @@ class PlaywrightValidator:
     def __init__(self) -> None:
         self.parser = PlaywrightParserTool()
 
-    @log_performance("playwright_validator.validate")
     def validate(self, repo_path: str) -> ValidationCheck:
-        log_step("playwright_validation_started", {"repo_path": repo_path})
+        logger.info(
+            "[playwright-generation] stage=playwright_validation status=started repo=%s",
+            repo_path,
+        )
         try:
             root = Path(repo_path)
             spec_files = self._find_spec_files(root)
@@ -50,8 +46,11 @@ class PlaywrightValidator:
                 discovered_tests += len(tests)
                 duplicate_messages.extend(self._duplicate_title_messages(relative_path, tests))
 
-            log_metric("playwright_validation_spec_count", len(spec_files))
-            log_metric("playwright_validation_test_count", discovered_tests)
+            logger.info(
+                "[playwright-generation] stage=playwright_validation discovered_specs=%s discovered_tests=%s",
+                len(spec_files),
+                discovered_tests,
+            )
 
             if not spec_files:
                 return ValidationCheck(
@@ -66,14 +65,18 @@ class PlaywrightValidator:
                     output="\n".join(duplicate_messages),
                 )
 
-            logger.info("Playwright validation completed")
+            logger.info("[playwright-generation] stage=playwright_validation status=completed")
             return ValidationCheck(
                 name="playwright_discovery",
                 passed=True,
                 output=f"Discovered {discovered_tests} Playwright test(s) in {len(spec_files)} spec file(s).",
             )
         except Exception as exc:
-            log_exception(exc, context={"repo_path": repo_path, "stage": "playwright_validation"})
+            logger.exception(
+                "[playwright-generation] stage=playwright_validation status=failed repo=%s error=%s",
+                repo_path,
+                exc,
+            )
             raise
 
     def _find_spec_files(self, root: Path) -> list[Path]:

@@ -1,22 +1,15 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
-from worktop.core_services.app.utility.custom_logger.log_helpers import (
-    log_card_simple,
-    log_exception,
-    log_metric,
-    log_step,
-)
-from worktop.core_services.app.utility.custom_logger.logging import (
-    log_performance,
-    logger,
-)
 
 from app.patching.backup_manager import BackupManager
 from app.patching.diff_generator import DiffGenerator
 from app.patching.patch_planner import PatchPlanner
 from app.schemas.code_patch import AppliedPatch, PatchSet, PatchWriteResult
+
+logger = logging.getLogger(__name__)
 
 
 class ScopedPatchWriter:
@@ -25,32 +18,79 @@ class ScopedPatchWriter:
         self.diffs = DiffGenerator()
         self.planner = PatchPlanner()
 
-    @log_performance("scoped_patch_writer.apply")
     def apply(self, repo_path: str, patches: PatchSet) -> PatchWriteResult:
-        log_step("scoped_patch_writer_started", {"repo_path": repo_path})
+        logger.info(
+            "[playwright-generation] stage=patch_writer status=started "
+            f"repo={repo_path} requested_patches={len(patches.patches)}"
+        )
         try:
             planned = self.planner.validate(patches)
+            logger.info(
+                "[playwright-generation] stage=patch_writer status=validated "
+                f"planned_patches={len(planned.patches)}"
+            )
             result = PatchWriteResult()
             for patch in planned.patches:
+                logger.info(
+                    "[playwright-generation] stage=patch_writer status=applying "
+                    f"operation={patch.operation} path={patch.path}"
+                )
                 path = self._resolve_safe_path(repo_path, patch.path)
                 path.parent.mkdir(parents=True, exist_ok=True)
                 before = path.read_text(encoding="utf-8") if path.exists() else ""
                 after = self._apply_content(before, patch)
-                self.backups.backup(path)
+                backup_path = self.backups.backup(path)
                 path.write_text(after, encoding="utf-8")
                 result.applied.append(
                     AppliedPatch(
                         path=patch.path,
                         operation=patch.operation,
                         diff=self.diffs.unified(before, after, patch.path),
+                        backup_path=str(backup_path) if backup_path else None,
                     )
                 )
-            log_metric("applied_patch_count", len(planned.patches))
-            logger.info("Scoped patch writer completed")
+            logger.info(
+                "[playwright-generation] stage=patch_writer status=completed "
+                f"applied={len(result.applied)}"
+            )
             return result
         except Exception as exc:
-            log_exception(exc, context={"repo_path": repo_path, "stage": "patch_writer"})
+            logger.exception(
+                "[playwright-generation] stage=patch_writer status=failed "
+                f"error={exc}"
+            )
             raise
+
+    def rollback(self, repo_path: str, result: PatchWriteResult) -> None:
+        logger.info(
+            "[playwright-generation] stage=patch_writer_rollback status=started repo=%s patches=%s",
+            repo_path,
+            len(result.applied),
+        )
+        root = Path(repo_path).resolve()
+        for applied in reversed(result.applied):
+            path = self._resolve_safe_path(repo_path, applied.path)
+            backup_path = Path(applied.backup_path).resolve() if applied.backup_path else None
+            if backup_path and backup_path.exists() and root in backup_path.parents:
+                path.write_text(backup_path.read_text(encoding="utf-8"), encoding="utf-8")
+                logger.info(
+                    "[playwright-generation] stage=patch_writer_rollback status=restored path=%s backup=%s",
+                    applied.path,
+                    backup_path,
+                )
+            elif applied.operation == "create" and path.exists():
+                path.unlink()
+                logger.info(
+                    "[playwright-generation] stage=patch_writer_rollback status=removed_created_file path=%s",
+                    applied.path,
+                )
+            else:
+                logger.warning(
+                    "[playwright-generation] stage=patch_writer_rollback status=skipped path=%s backup=%s",
+                    applied.path,
+                    backup_path,
+                )
+        logger.info("[playwright-generation] stage=patch_writer_rollback status=completed")
 
     def _resolve_safe_path(self, repo_path: str, relative_path: str) -> Path:
         root = Path(repo_path).resolve()

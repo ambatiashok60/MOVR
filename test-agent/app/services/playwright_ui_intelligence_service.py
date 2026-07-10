@@ -1,17 +1,9 @@
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 
-from worktop.core_services.app.utility.custom_logger.log_helpers import (
-    log_exception,
-    log_metric,
-    log_step,
-)
-from worktop.core_services.app.utility.custom_logger.logging import (
-    log_performance,
-    logger,
-)
 
 from app.schemas.playwright_ui_context import (
     AuthSessionEvidence,
@@ -26,6 +18,8 @@ from app.schemas.playwright_ui_context import (
 )
 from app.schemas.repo_profile import RepoProfile
 from app.schemas.repository_inventory import RepositoryInventory
+
+logger = logging.getLogger(__name__)
 
 
 class PlaywrightUiIntelligenceService:
@@ -47,14 +41,16 @@ class PlaywrightUiIntelligenceService:
     HELPER_PATTERN = re.compile(r"\b(?P<name>(?:mock|stub|build|create|seed)[A-Z][A-Za-z0-9_]*)\b")
     TAG_PATTERN = re.compile(r"@\w[\w-]*")
 
-    @log_performance("playwright_ui_intelligence_service.build")
     def build(
         self,
         repo_path: str,
         inventory: RepositoryInventory,
         repo_profile: RepoProfile,
     ) -> PlaywrightUiContext:
-        log_step("playwright_ui_intelligence_started", {"repo_path": repo_path})
+        logger.info(
+            "[playwright-generation] stage=playwright_ui_intelligence status=started repo=%s",
+            repo_path,
+        )
         try:
             root = Path(repo_path)
             context = PlaywrightUiContext(
@@ -64,10 +60,26 @@ class PlaywrightUiIntelligenceService:
                 ci_commands=self._ci_commands(repo_profile),
                 quality_requirements=self._quality_requirements(),
             )
-            for path in self._candidate_files(root):
+            candidate_files = self._candidate_files(root)
+            logger.info(
+                "[playwright-generation] stage=playwright_ui_intelligence status=scanning files=%s",
+                len(candidate_files),
+            )
+            for path in candidate_files:
                 relative = str(path.relative_to(root))
+                logger.debug(
+                    "[playwright-generation] stage=playwright_ui_intelligence "
+                    "status=reading_file path=%s size_bytes=%s",
+                    relative,
+                    path.stat().st_size,
+                )
                 content = self._read(path)
                 if not content:
+                    logger.debug(
+                        "[playwright-generation] stage=playwright_ui_intelligence "
+                        "status=skipped_empty path=%s",
+                        relative,
+                    )
                     continue
                 is_spec = any(test_file.path == relative for test_file in inventory.test_files)
                 self._collect_routes(context, relative, content)
@@ -76,19 +88,30 @@ class PlaywrightUiIntelligenceService:
                 self._collect_auth_patterns(context, relative, content, is_spec)
                 self._collect_test_data_patterns(context, relative, content)
                 if is_spec:
+                    logger.debug(
+                        "[playwright-generation] stage=ui_evidence kind=existing_spec_pattern file=%s",
+                        relative,
+                    )
                     context.existing_spec_patterns.append(
                         self._spec_pattern(relative, content)
                     )
 
             self._trim(context)
-            log_metric("ui_route_evidence_count", len(context.routes))
-            log_metric("ui_element_evidence_count", len(context.ui_elements))
-            log_metric("mock_pattern_count", len(context.mock_patterns))
-            log_metric("auth_pattern_count", len(context.auth_session_patterns))
-            logger.info("Playwright UI intelligence completed")
+            logger.info(
+                "[playwright-generation] stage=playwright_ui_intelligence status=completed "
+                "routes=%s ui_elements=%s mock_patterns=%s auth_patterns=%s",
+                len(context.routes),
+                len(context.ui_elements),
+                len(context.mock_patterns),
+                len(context.auth_session_patterns),
+            )
             return context
         except Exception as exc:
-            log_exception(exc, context={"repo_path": repo_path, "stage": "playwright_ui_intelligence"})
+            logger.exception(
+                "[playwright-generation] stage=playwright_ui_intelligence status=failed repo=%s error=%s",
+                repo_path,
+                exc,
+            )
             raise
 
     def _candidate_files(self, root: Path) -> list[Path]:
@@ -115,11 +138,19 @@ class PlaywrightUiIntelligenceService:
             for match in pattern.finditer(content):
                 route = match.group("path").strip()
                 if route:
+                    line = self._line_number(content, match.start())
+                    logger.debug(
+                        "[playwright-generation] stage=ui_evidence kind=route "
+                        "file=%s line=%s route=%s",
+                        relative,
+                        line,
+                        route,
+                    )
                     context.routes.append(
                         UiRouteEvidence(
                             path=route,
                             file_path=relative,
-                            line=self._line_number(content, match.start()),
+                            line=line,
                             reason="Route declaration discovered in UI source.",
                         )
                     )
@@ -138,11 +169,21 @@ class PlaywrightUiIntelligenceService:
                 text = " ".join(match.group("value").split())
                 if not text:
                     continue
+                line = self._line_number(content, match.start())
                 role = "button" if pattern == self.BUTTON_TEXT_PATTERN else None
+                logger.debug(
+                    "[playwright-generation] stage=ui_evidence kind=ui_element "
+                    "file=%s line=%s locator_hint=%s text=%s role=%s",
+                    relative,
+                    line,
+                    locator_hint,
+                    text,
+                    role,
+                )
                 context.ui_elements.append(
                     UiElementEvidence(
                         file_path=relative,
-                        line=self._line_number(content, match.start()),
+                        line=line,
                         text=text,
                         role=role,
                         locator_hint=locator_hint,
@@ -150,10 +191,17 @@ class PlaywrightUiIntelligenceService:
                     )
                 )
         for match in self.ROLE_PATTERN.finditer(content):
+            line = self._line_number(content, match.start())
+            logger.debug(
+                "[playwright-generation] stage=ui_evidence kind=role file=%s line=%s role=%s",
+                relative,
+                line,
+                match.group("value"),
+            )
             context.ui_elements.append(
                 UiElementEvidence(
                     file_path=relative,
-                    line=self._line_number(content, match.start()),
+                    line=line,
                     role=match.group("value"),
                     locator_hint="getByRole",
                     reason="Explicit ARIA role discovered in UI source.",
@@ -170,16 +218,29 @@ class PlaywrightUiIntelligenceService:
         lower = content.lower()
         if "page.route" in content or "route.fulfill" in content:
             for match in self.ENDPOINT_PATTERN.finditer(content):
+                line = self._line_number(content, match.start())
+                logger.debug(
+                    "[playwright-generation] stage=ui_evidence kind=mock_pattern "
+                    "file=%s line=%s endpoint=%s",
+                    relative,
+                    line,
+                    match.group("endpoint"),
+                )
                 context.mock_patterns.append(
                     MockPatternEvidence(
                         kind="playwright_route_stub",
                         file_path=relative,
-                        line=self._line_number(content, match.start()),
+                        line=line,
                         endpoint_or_handler=match.group("endpoint"),
                         reason="Existing Playwright route stubbing pattern.",
                     )
                 )
             if "page.route" in content and not any(pattern.file_path == relative for pattern in context.mock_patterns):
+                logger.debug(
+                    "[playwright-generation] stage=ui_evidence kind=mock_pattern "
+                    "file=%s line=unknown endpoint=unknown",
+                    relative,
+                )
                 context.mock_patterns.append(
                     MockPatternEvidence(
                         kind="playwright_route_stub",
@@ -188,6 +249,10 @@ class PlaywrightUiIntelligenceService:
                     )
                 )
         if "msw" in lower or "server.use" in content or "http.get" in content or "graphql." in content:
+            logger.debug(
+                "[playwright-generation] stage=ui_evidence kind=network_handler file=%s",
+                relative,
+            )
             context.mock_patterns.append(
                 MockPatternEvidence(
                     kind="msw_or_network_handler",
@@ -199,11 +264,19 @@ class PlaywrightUiIntelligenceService:
             for match in self.HELPER_PATTERN.finditer(content):
                 name = match.group("name")
                 if name.lower().startswith(("mock", "stub")):
+                    line = self._line_number(content, match.start())
+                    logger.debug(
+                        "[playwright-generation] stage=ui_evidence kind=mock_helper "
+                        "file=%s line=%s helper=%s",
+                        relative,
+                        line,
+                        name,
+                    )
                     context.mock_patterns.append(
                         MockPatternEvidence(
                             kind="mock_helper",
                             file_path=relative,
-                            line=self._line_number(content, match.start()),
+                            line=line,
                             helper_name=name,
                             reason="Reusable mock/stub helper discovered.",
                         )
@@ -227,6 +300,12 @@ class PlaywrightUiIntelligenceService:
         )
         for kind, token in signals:
             if token.lower() in lower:
+                logger.debug(
+                    "[playwright-generation] stage=ui_evidence kind=auth_session "
+                    "file=%s token=%s",
+                    relative,
+                    token,
+                )
                 context.auth_session_patterns.append(
                     AuthSessionEvidence(
                         kind=kind,
@@ -236,6 +315,10 @@ class PlaywrightUiIntelligenceService:
                     )
                 )
         if is_spec and "test.use" in content:
+            logger.debug(
+                "[playwright-generation] stage=ui_evidence kind=test_use_fixture file=%s",
+                relative,
+            )
             context.auth_session_patterns.append(
                 AuthSessionEvidence(
                     kind="test_use_fixture",
@@ -257,11 +340,19 @@ class PlaywrightUiIntelligenceService:
         for match in self.HELPER_PATTERN.finditer(content):
             name = match.group("name")
             if name.lower().startswith(("build", "create", "seed", "mock")):
+                line = self._line_number(content, match.start())
+                logger.debug(
+                    "[playwright-generation] stage=ui_evidence kind=test_data "
+                    "file=%s line=%s symbol=%s",
+                    relative,
+                    line,
+                    name,
+                )
                 context.test_data_patterns.append(
                     TestDataEvidence(
                         kind="builder_or_fixture",
                         file_path=relative,
-                        line=self._line_number(content, match.start()),
+                        line=line,
                         symbol=name,
                         reason="Reusable UI test data pattern discovered.",
                     )
