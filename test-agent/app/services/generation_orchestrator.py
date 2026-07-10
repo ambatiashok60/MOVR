@@ -55,6 +55,7 @@ from app.services.test_value_service import TestValueService
 from app.services.traceability_service import TraceabilityService
 from app.schemas.validation_result import ValidationCheck, ValidationResult
 from app.validation.repo_command_validator import RepoCommandValidator
+from app.workspace.workspace_manager import JobWorkspace, WorkspaceManager
 from app.logging_config import log_event
 
 logger = logging.getLogger(__name__)
@@ -80,11 +81,13 @@ class GenerationOrchestrator:
         self.review_report = ReviewReportService()
         self.policy = RepositoryPolicyService()
         self.manifest = GenerationManifestService()
+        self.workspaces = WorkspaceManager()
 
     def generate(self, request: GenerationRequest) -> GenerationResult:
         context = {"job_id": request.job_id, "repo_path": request.repo_path, "stage": "generation"}
         generation_started_at = perf_counter()
         review_reasons: list[str] = []
+        workspace: JobWorkspace | None = None
         log_event(
             logger,
             logging.INFO,
@@ -104,6 +107,13 @@ class GenerationOrchestrator:
             if repo_profile.support_status == "unsupported":
                 self._log_stage(request.job_id, "repo_strategy", "failed", "unsupported_repository")
                 raise UnsupportedRepositoryError(repo_profile)
+
+            workspace = self._run_stage(
+                request.job_id,
+                "workspace_acquire",
+                lambda: self.workspaces.acquire(request.job_id, request.repo_path),
+                completed=lambda acquired: {"workspace": str(acquired.root)},
+            )
 
             repository_policy = self._run_stage(
                 request.job_id,
@@ -352,6 +362,7 @@ class GenerationOrchestrator:
                 repair=repair,
                 policy=repository_policy,
                 budget=budget,
+                workspace=workspace,
             )
 
             coverage_report = self._assess_coverage_preservation(
@@ -482,6 +493,9 @@ class GenerationOrchestrator:
                 exc,
             )
             raise
+        finally:
+            if workspace is not None:
+                self.workspaces.release(workspace)
 
     def _assess_coverage_preservation(
         self,
@@ -662,6 +676,7 @@ class GenerationOrchestrator:
         requires_bootstrap: bool = False,
         policy: RepositoryPolicy | None = None,
         budget: GenerationBudget | None = None,
+        workspace: JobWorkspace | None = None,
     ) -> tuple[PatchWriteResult, ValidationResult | None, PatchSet]:
         patch_result = PatchWriteResult()
         max_attempts = max(settings.max_repair_attempts, 0)
@@ -696,7 +711,7 @@ class GenerationOrchestrator:
             if validation is not None and not validation.passed:
                 return patch_result, validation, patches
 
-        patch_result = self._write_patches(request, patches, attempt=0)
+        patch_result = self._write_patches(request, patches, attempt=0, workspace=workspace)
 
         if not request.run_validation:
             self._log_stage(request.job_id, "validation", "skipped")
@@ -724,9 +739,8 @@ class GenerationOrchestrator:
             self._run_stage(
                 request.job_id,
                 "patch_rollback",
-                lambda result=patch_result: self.patch_writer.rollback(
-                    request.repo_path,
-                    result,
+                lambda result=patch_result: self._rollback_patches(
+                    request, result, workspace
                 ),
                 started={"attempt": attempt},
             )
@@ -765,7 +779,9 @@ class GenerationOrchestrator:
             if not plan_validation.passed:
                 validation = plan_validation
                 continue
-            patch_result = self._write_patches(request, patches, attempt=attempt)
+            patch_result = self._write_patches(
+                request, patches, attempt=attempt, workspace=workspace
+            )
             validation = self._validate_patches(request, patches, ui_context, attempt=attempt)
             validation.repair_attempted = True
             if validation.passed:
@@ -794,9 +810,8 @@ class GenerationOrchestrator:
             self._run_stage(
                 request.job_id,
                 "patch_rollback",
-                lambda result=patch_result: self.patch_writer.rollback(
-                    request.repo_path,
-                    result,
+                lambda result=patch_result: self._rollback_patches(
+                    request, result, workspace
                 ),
                 started={"reason": "policy_rollback_failed_patch"},
             )
@@ -1783,12 +1798,22 @@ class GenerationOrchestrator:
         request: GenerationRequest,
         patches: PatchSet,
         attempt: int,
+        workspace: JobWorkspace | None = None,
     ) -> PatchWriteResult:
         stage = "patch_write" if attempt == 0 else "repair_patch_write"
+
+        def write() -> PatchWriteResult:
+            if workspace is not None:
+                self.workspaces.snapshot_targets(workspace, patches)
+            result = self.patch_writer.apply(request.repo_path, patches)
+            if workspace is not None:
+                self.workspaces.record_patches(workspace, result)
+            return result
+
         return self._run_stage(
             request.job_id,
             stage,
-            lambda: self.patch_writer.apply(request.repo_path, patches),
+            write,
             started={"attempt": attempt},
             completed=lambda result: {
                 "attempt": attempt,
@@ -1796,6 +1821,16 @@ class GenerationOrchestrator:
                 "paths": [patch.path for patch in result.applied],
             },
         )
+
+    def _rollback_patches(
+        self,
+        request: GenerationRequest,
+        result: PatchWriteResult,
+        workspace: JobWorkspace | None = None,
+    ) -> None:
+        self.patch_writer.rollback(request.repo_path, result)
+        if workspace is not None:
+            self.workspaces.record_rollback(workspace, result)
 
     def _validate_patches(
         self,

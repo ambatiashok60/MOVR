@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -30,6 +31,7 @@ from app.schemas.validation_result import ValidationCheck, ValidationResult
 from app.services.review_report_service import ReviewReportService
 from app.services.test_value_service import TestValueService
 from app.services.traceability_service import TraceabilityService
+from app.workspace.workspace_manager import WorkspaceLockedError, WorkspaceManager
 
 
 EXISTING_SPEC = """import { test, expect } from '@playwright/test';
@@ -721,3 +723,76 @@ class TestGenerationBudget:
             budget.charge_tool_call()
 
         assert "elapsed" in str(excinfo.value)
+
+
+class TestWorkspaceIsolation:
+    def test_second_job_on_same_repo_is_locked_out(self, tmp_path: Path) -> None:
+        manager = WorkspaceManager(workspace_root=str(tmp_path / "ws"))
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        first = manager.acquire("job-a", str(repo))
+        with pytest.raises(WorkspaceLockedError) as excinfo:
+            manager.acquire("job-b", str(repo))
+        assert "job-a" in str(excinfo.value)
+
+        manager.release(first)
+        second = manager.acquire("job-b", str(repo))
+        assert second.job_id == "job-b"
+        manager.release(second)
+
+    def test_different_repos_do_not_contend(self, tmp_path: Path) -> None:
+        manager = WorkspaceManager(workspace_root=str(tmp_path / "ws"))
+        repo_a = tmp_path / "repo-a"
+        repo_b = tmp_path / "repo-b"
+        repo_a.mkdir()
+        repo_b.mkdir()
+
+        first = manager.acquire("job-a", str(repo_a))
+        second = manager.acquire("job-b", str(repo_b))
+
+        assert first.root != second.root
+        manager.release(first)
+        manager.release(second)
+
+    def test_journals_and_snapshot_record_job_activity(self, tmp_path: Path) -> None:
+        manager = WorkspaceManager(workspace_root=str(tmp_path / "ws"))
+        repo = tmp_path / "repo"
+        (repo / "e2e").mkdir(parents=True)
+        spec = repo / "e2e" / "employee.spec.ts"
+        spec.write_text("original content\n", encoding="utf-8")
+
+        workspace = manager.acquire("job-a", str(repo))
+        patches = PatchSet(
+            patches=[CodePatch(path="e2e/employee.spec.ts", operation="append", content="new\n")]
+        )
+        manager.snapshot_targets(workspace, patches)
+        write_result = PatchWriteResult(
+            applied=[AppliedPatch(path="e2e/employee.spec.ts", operation="append", diff="…")]
+        )
+        manager.record_patches(workspace, write_result)
+        manager.record_rollback(workspace, write_result)
+
+        snapshot = workspace.snapshot_dir / "e2e" / "employee.spec.ts"
+        assert snapshot.read_text(encoding="utf-8") == "original content\n"
+        patch_entries = [
+            json.loads(line)
+            for line in workspace.patch_journal.read_text(encoding="utf-8").splitlines()
+        ]
+        assert patch_entries[0]["path"] == "e2e/employee.spec.ts"
+        assert patch_entries[0]["job_id"] == "job-a"
+        rollback_entries = workspace.rollback_journal.read_text(encoding="utf-8").splitlines()
+        assert len(rollback_entries) == 1
+        manager.release(workspace)
+
+    def test_stale_lock_is_reclaimed(self, tmp_path: Path) -> None:
+        manager = WorkspaceManager(workspace_root=str(tmp_path / "ws"))
+        manager.stale_lock_seconds = 0.0
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        manager.acquire("job-dead", str(repo))
+        reclaimed = manager.acquire("job-live", str(repo))
+
+        assert reclaimed.job_id == "job-live"
+        manager.release(reclaimed)
