@@ -3,10 +3,16 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.coverage.coverage_preservation_service import CoveragePreservationService
-from app.schemas.behavioral_test_unit import BehavioralTestUnit
-from app.schemas.code_patch import CodePatch, PatchSet
+from app.schemas.behavioral_test_unit import AnchorFlowContext, BehavioralTestUnit
+from app.schemas.code_patch import AppliedPatch, CodePatch, PatchSet, PatchWriteResult
+from app.schemas.decision_trace import DecisionTrace
 from app.schemas.functional_intent import FunctionalIntent
 from app.schemas.generation_request import GenerationRequest
+from app.schemas.test_action_decision import (
+    TestActionDecision as PlaywrightTestActionDecision,
+)
+from app.schemas.validation_result import ValidationCheck, ValidationResult
+from app.services.review_report_service import ReviewReportService
 from app.services.test_value_service import TestValueService
 from app.services.traceability_service import TraceabilityService
 
@@ -316,3 +322,116 @@ class TestRequirementTraceability:
             "Requirement not traceable to any code: "
             "'Export quarterly payroll summary as PDF'."
         ]
+
+
+class TestReviewReport:
+    def test_report_condenses_generation_into_reviewable_sections(self) -> None:
+        service = ReviewReportService()
+        request = GenerationRequest(
+            job_id="job-1",
+            repo_path="/tmp/repo",
+            test_case_name="Employee empty state",
+        )
+        action = PlaywrightTestActionDecision(
+            action="append_new_test",
+            confidence=0.8,
+            decision_trace=DecisionTrace(
+                decision="append_new_test",
+                confidence=0.8,
+                justification="Target spec owns the employee flow; appending is additive.",
+                evidence=["employee.spec.ts owns the flow"],
+            ),
+        )
+        anchor = AnchorFlowContext(
+            file_path="e2e/employee.spec.ts",
+            anchor_test_title="creates an employee",
+            page_objects=["EmployeePage"],
+            fixtures=["page"],
+        )
+        patches = PatchSet(
+            patches=[
+                CodePatch(
+                    path="e2e/employee.spec.ts",
+                    operation="append",
+                    reason="Cover the empty state behavior",
+                    content=(
+                        "test('shows empty state', async ({ page }) => {\n"
+                        "  const employeePage = new EmployeePage(page);\n"
+                        "  await employeePage.gotoList();\n"
+                        "  await expect(page.locator('.empty')).toBeVisible();\n"
+                        "});\n"
+                    ),
+                ),
+                CodePatch(
+                    path="pages/employee.page.ts",
+                    operation="replace",
+                    start_line=10,
+                    end_line=12,
+                    content="  async filterByNone(): Promise<void> {\n    await this.filter.click();\n  }\n",
+                ),
+            ]
+        )
+        patch_result = PatchWriteResult(
+            applied=[
+                AppliedPatch(path="e2e/employee.spec.ts", operation="append", diff="…"),
+                AppliedPatch(path="pages/employee.page.ts", operation="replace", diff="…"),
+            ]
+        )
+        validation = ValidationResult(
+            passed=True,
+            checks=[ValidationCheck(name="tsc", passed=True)],
+        )
+
+        report = service.build(
+            request,
+            action=action,
+            anchor_flow_context=anchor,
+            patches=patches,
+            patch_result=patch_result,
+            validation=validation,
+            review_reasons=["Spec placement confidence 0.40 is below the review threshold 0.50."],
+        )
+
+        assert "2 patch(es) planned, 2 applied" in report.summary
+        assert [change.path for change in report.files_changed] == [
+            "e2e/employee.spec.ts",
+            "pages/employee.page.ts",
+        ]
+        assert any("creates an employee" in flow for flow in report.flows_reused)
+        assert report.action == "append_new_test"
+        assert "appending is additive" in report.action_rationale
+        assert "pages/employee.page.ts: filterByNone()" in report.methods_created
+        assert "employeePage.gotoList()" in report.methods_reused
+        assert any("toBeVisible" in assertion for assertion in report.assertions_added)
+        assert report.validation_summary == "Validation passed (1 check(s))."
+        assert len(report.remaining_risks) == 1
+        for heading in (
+            "# Generation Review Report",
+            "## Files Changed",
+            "## Flow Reused",
+            "## Why append_new_test",
+            "## Methods Created",
+            "## Locators Reused",
+            "## Assertions Added",
+            "## Validation",
+            "## Remaining Risks",
+        ):
+            assert heading in report.markdown
+
+    def test_report_surfaces_failed_validation_and_empty_sections(self) -> None:
+        service = ReviewReportService()
+        request = GenerationRequest(
+            job_id="job-2", repo_path="/tmp/repo", test_case_name="Broken run"
+        )
+        validation = ValidationResult(
+            passed=False,
+            checks=[ValidationCheck(name="playwright_dry_run", passed=False)],
+            repair_attempted=True,
+        )
+
+        report = service.build(request, validation=validation)
+
+        assert "Validation FAILED" in report.validation_summary
+        assert "playwright_dry_run" in report.validation_summary
+        assert "repair attempted" in report.validation_summary
+        assert "- None identified" in report.markdown

@@ -37,6 +37,7 @@ from app.services.ownership_resolution_service import OwnershipResolutionService
 from app.services.playwright_ui_intelligence_service import PlaywrightUiIntelligenceService
 from app.services.repo_strategy_service import RepoStrategyService
 from app.services.result_builder_service import ResultBuilderService
+from app.services.review_report_service import ReviewReportService
 from app.services.source_intelligence_service import SourceIntelligenceService
 from app.services.spec_placement_service import SpecPlacementService
 from app.services.technology_intelligence_service import TechnologyIntelligenceService
@@ -68,6 +69,7 @@ class GenerationOrchestrator:
         self.coverage = CoveragePreservationService()
         self.test_value = TestValueService()
         self.traceability = TraceabilityService()
+        self.review_report = ReviewReportService()
 
     def generate(self, request: GenerationRequest) -> GenerationResult:
         context = {"job_id": request.job_id, "repo_path": request.repo_path, "stage": "generation"}
@@ -338,6 +340,27 @@ class GenerationOrchestrator:
                     self.traceability.review_reasons(traceability_matrix)
                 )
 
+            review_report = self._run_optional_stage(
+                request.job_id,
+                "review_report",
+                lambda: self.review_report.build(
+                    request,
+                    placement=placement,
+                    action=action,
+                    flow_plan=flow_plan,
+                    anchor_flow_context=anchor_flow_context,
+                    existing_test_context=existing_test_context,
+                    locator_decisions=locator_decisions,
+                    patches=patches,
+                    patch_result=patch_result,
+                    validation=validation,
+                    coverage=coverage_report,
+                    test_value=test_value_report,
+                    traceability=traceability_matrix,
+                    review_reasons=review_reasons,
+                ),
+            )
+
             decision_trace = [
                 trace
                 for trace in (
@@ -360,6 +383,7 @@ class GenerationOrchestrator:
                     coverage=coverage_report,
                     test_value=test_value_report,
                     traceability=traceability_matrix,
+                    review_report=review_report,
                 ),
                 completed=lambda built: {
                     "files_changed": len(built.files_changed),
