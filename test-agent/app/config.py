@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_name: str = "playwright-agent-service"
     default_model_provider: str | None = None
+    default_technology: str = "playwright"
     workspace_root: str = "/tmp"
     enable_targeted_runtime: bool = False
     validation_timeout_seconds: int = 120

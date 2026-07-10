@@ -8,6 +8,7 @@ from pathlib import Path, PurePosixPath
 from time import perf_counter
 from typing import Any
 
+from app.adapters.adapter_registry import default_adapter_registry
 from app.agents.critic_agent import CriticAgent
 from app.agents.functional_intent_agent import FunctionalIntentAgent
 from app.agents.locator_reasoning_agent import LocatorReasoningAgent
@@ -20,7 +21,6 @@ from app.governance.generation_budget import (
     BudgetExceededError,
     GenerationBudget,
 )
-from app.patching.scoped_patch_writer import ScopedPatchWriter
 from app.policy.repository_policy_service import RepositoryPolicyService
 from app.schemas.behavioral_test_unit import (
     AnchorFlowContext,
@@ -35,27 +35,22 @@ from app.schemas.generation_result import GenerationResult
 from app.schemas.playwright_ui_context import PlaywrightUiContext
 from app.schemas.repository_policy import RepositoryPolicy
 from app.schemas.test_action_decision import TestActionDecision, TestActions
-from app.services.behavioral_inventory_service import BehavioralInventoryService
 from app.services.bootstrap_scaffold_service import BootstrapScaffoldService
 from app.services.code_generation_service import CodeGenerationService
 from app.services.flow_merge_service import FlowMergeService
 from app.services.generation_manifest_service import GenerationManifestService
 from app.services.idempotency_service import IdempotencyService
-from app.services.inventory_service import InventoryService
 from app.services.ownership_resolution_service import OwnershipResolutionService
 from app.services.playwright_ui_intelligence_service import PlaywrightUiIntelligenceService
-from app.services.repo_strategy_service import RepoStrategyService
 from app.services.result_builder_service import ResultBuilderService
 from app.services.review_report_service import ReviewReportService
 from app.services.source_intelligence_service import SourceIntelligenceService
 from app.services.spec_placement_service import SpecPlacementService
 from app.services.technology_intelligence_service import TechnologyIntelligenceService
 from app.services.test_action_service import TestActionService
-from app.services.test_file_classifier_service import TestFileClassifierService
 from app.services.test_value_service import TestValueService
 from app.services.traceability_service import TraceabilityService
 from app.schemas.validation_result import ValidationCheck, ValidationResult
-from app.validation.repo_command_validator import RepoCommandValidator
 from app.workspace.workspace_manager import JobWorkspace, WorkspaceManager
 from app.logging_config import log_event
 
@@ -65,16 +60,12 @@ logger = logging.getLogger(__name__)
 class GenerationOrchestrator:
     def __init__(self, db: Any | None = None) -> None:
         self.db = db
-        self.repo_strategy = RepoStrategyService()
+        self.adapters = default_adapter_registry()
+        self.adapter = self.adapters.resolve(settings.default_technology)
         self.technology = TechnologyIntelligenceService()
-        self.classifier = TestFileClassifierService()
-        self.inventory = InventoryService()
-        self.behavioral_inventory = BehavioralInventoryService()
         self.ui_intelligence = PlaywrightUiIntelligenceService()
         self.flow_merge = FlowMergeService()
         self.bootstrap = BootstrapScaffoldService()
-        self.patch_writer = ScopedPatchWriter()
-        self.validator = RepoCommandValidator()
         self.results = ResultBuilderService()
         self.coverage = CoveragePreservationService()
         self.test_value = TestValueService()
@@ -84,6 +75,22 @@ class GenerationOrchestrator:
         self.manifest = GenerationManifestService()
         self.workspaces = WorkspaceManager()
         self.idempotency = IdempotencyService()
+
+    @property
+    def patch_writer(self) -> Any:
+        return self.adapter.patch_writer
+
+    @patch_writer.setter
+    def patch_writer(self, value: Any) -> None:
+        self.adapter.patch_writer = value
+
+    @property
+    def validator(self) -> Any:
+        return self.adapter.validator
+
+    @validator.setter
+    def validator(self, value: Any) -> None:
+        self.adapter.validator = value
 
     def generate(self, request: GenerationRequest) -> GenerationResult:
         context = {"job_id": request.job_id, "repo_path": request.repo_path, "stage": "generation"}
@@ -102,7 +109,7 @@ class GenerationOrchestrator:
             repo_profile = self._run_stage(
                 request.job_id,
                 "repo_strategy",
-                lambda: self.repo_strategy.detect(request.repo_path, request.branch),
+                lambda: self.adapter.analyze_repository(request.repo_path, request.branch),
                 started={"repo": request.repo_path, "branch": request.branch or "default"},
                 completed=lambda profile: {"support_status": profile.support_status},
             )
@@ -152,14 +159,14 @@ class GenerationOrchestrator:
             classifications = self._run_stage(
                 request.job_id,
                 "test_file_classification",
-                lambda: self.classifier.classify(request.repo_path),
+                lambda: self.adapter.classify_test_files(request.repo_path),
                 completed=lambda files: {"classified_files": len(files)},
             )
 
             inventory = self._run_stage(
                 request.job_id,
                 "repository_inventory",
-                lambda: self.inventory.build(request.repo_path, classifications),
+                lambda: self.adapter.build_inventory(request.repo_path, classifications),
                 completed=lambda built: {
                     "test_files": len(built.test_files),
                     "page_objects": len(built.page_objects),
@@ -221,7 +228,7 @@ class GenerationOrchestrator:
             behavior = self._run_stage(
                 request.job_id,
                 "behavioral_inventory",
-                lambda: self.behavioral_inventory.extract(inventory),
+                lambda: self.adapter.build_flow_inventory(inventory),
                 completed=lambda candidates: {"candidate_tests": len(candidates)},
             )
 
@@ -1832,7 +1839,7 @@ class GenerationOrchestrator:
         def write() -> PatchWriteResult:
             if workspace is not None:
                 self.workspaces.snapshot_targets(workspace, patches)
-            result = self.patch_writer.apply(request.repo_path, patches)
+            result = self.adapter.apply_patch(request.repo_path, patches)
             if workspace is not None:
                 self.workspaces.record_patches(workspace, result)
             return result
@@ -1855,7 +1862,7 @@ class GenerationOrchestrator:
         result: PatchWriteResult,
         workspace: JobWorkspace | None = None,
     ) -> None:
-        self.patch_writer.rollback(request.repo_path, result)
+        self.adapter.rollback(request.repo_path, result)
         if workspace is not None:
             self.workspaces.record_rollback(workspace, result)
 
@@ -1870,7 +1877,7 @@ class GenerationOrchestrator:
         return self._run_stage(
             request.job_id,
             stage,
-            lambda: self.validator.validate(request.repo_path, patches, ui_context),
+            lambda: self.adapter.validate(request.repo_path, patches, ui_context),
             started={"attempt": attempt},
             completed=lambda result: {
                 "attempt": attempt,

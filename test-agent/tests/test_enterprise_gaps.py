@@ -5,6 +5,12 @@ from pathlib import Path
 
 import pytest
 
+from app.adapters.adapter_registry import (
+    UnknownTechnologyError,
+    default_adapter_registry,
+)
+from app.adapters.playwright_adapter import PlaywrightAdapter
+from app.adapters.technology_adapter import TechnologyAdapter
 from app.agents.base_agent import BaseAgent
 from app.coverage.coverage_preservation_service import CoveragePreservationService
 from app.governance.generation_budget import (
@@ -931,3 +937,73 @@ class TestDataGovernance:
         assert "hunter2secret" not in redacted
         assert "[REDACTED]" in redacted
         assert "employees" in redacted
+
+
+class TestTechnologyAdapters:
+    def test_playwright_adapter_implements_the_full_interface(self) -> None:
+        adapter = PlaywrightAdapter()
+
+        assert isinstance(adapter, TechnologyAdapter)
+        assert adapter.technology == "playwright"
+        for method in (
+            "analyze_repository",
+            "classify_test_files",
+            "build_inventory",
+            "build_flow_inventory",
+            "apply_patch",
+            "rollback",
+            "validate",
+        ):
+            assert callable(getattr(adapter, method))
+
+    def test_registry_resolves_playwright_and_rejects_unknown(self) -> None:
+        registry = default_adapter_registry()
+
+        assert isinstance(registry.resolve("playwright"), PlaywrightAdapter)
+        assert registry.registered() == ["playwright"]
+        with pytest.raises(UnknownTechnologyError) as excinfo:
+            registry.resolve("rest_assured")
+        assert "rest_assured" in str(excinfo.value)
+        assert "playwright" in str(excinfo.value)
+
+    def test_new_technology_plugs_in_without_touching_the_core(self) -> None:
+        class RestAssuredAdapter(PlaywrightAdapter):
+            technology = "rest_assured"
+
+        registry = default_adapter_registry()
+        registry.register(RestAssuredAdapter())
+
+        assert registry.registered() == ["playwright", "rest_assured"]
+        assert registry.resolve("rest_assured").technology == "rest_assured"
+
+    def test_orchestrator_drives_the_adapter_boundary(self, tmp_path: Path) -> None:
+        from app.services.generation_orchestrator import GenerationOrchestrator
+
+        orchestrator = GenerationOrchestrator()
+
+        assert orchestrator.adapter.technology == "playwright"
+        # Legacy seams stay writable and land on the adapter.
+        sentinel = object()
+        orchestrator.patch_writer = sentinel
+        assert orchestrator.adapter.patch_writer is sentinel
+        orchestrator.validator = sentinel
+        assert orchestrator.adapter.validator is sentinel
+
+    def test_adapter_end_to_end_on_a_real_repository(self, tmp_path: Path) -> None:
+        adapter = PlaywrightAdapter()
+        patches = PatchSet(
+            patches=[
+                CodePatch(
+                    path="e2e/employee.spec.ts",
+                    operation="create",
+                    content=EXISTING_SPEC,
+                )
+            ]
+        )
+
+        result = adapter.apply_patch(str(tmp_path), patches)
+        assert [applied.path for applied in result.applied] == ["e2e/employee.spec.ts"]
+        assert (tmp_path / "e2e" / "employee.spec.ts").exists()
+
+        adapter.rollback(str(tmp_path), result)
+        assert not (tmp_path / "e2e" / "employee.spec.ts").exists()
