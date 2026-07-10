@@ -75,10 +75,15 @@ class TestValueService:
         )
         return report
 
-    def review_reasons(self, report: TestValueReport) -> list[str]:
+    def review_reasons(
+        self,
+        report: TestValueReport,
+        *,
+        allow_full_duplicates: bool = False,
+    ) -> list[str]:
         reasons: list[str] = []
         for assessment in report.assessments:
-            if assessment.verdict == "FULL_DUPLICATE":
+            if assessment.verdict == "FULL_DUPLICATE" and not allow_full_duplicates:
                 reasons.append(
                     f"Generated test '{assessment.test_title}' fully duplicates "
                     f"'{assessment.closest_existing_test}' in "

@@ -16,6 +16,7 @@ from app.config import settings
 from app.coverage.coverage_preservation_service import CoveragePreservationService
 from app.errors import UnsupportedRepositoryError
 from app.patching.scoped_patch_writer import ScopedPatchWriter
+from app.policy.repository_policy_service import RepositoryPolicyService
 from app.schemas.behavioral_test_unit import (
     AnchorFlowContext,
     BehavioralTestUnit,
@@ -27,6 +28,7 @@ from app.schemas.decision_trace import DecisionTrace
 from app.schemas.generation_request import GenerationRequest
 from app.schemas.generation_result import GenerationResult
 from app.schemas.playwright_ui_context import PlaywrightUiContext
+from app.schemas.repository_policy import RepositoryPolicy
 from app.schemas.test_action_decision import TestActionDecision, TestActions
 from app.services.behavioral_inventory_service import BehavioralInventoryService
 from app.services.bootstrap_scaffold_service import BootstrapScaffoldService
@@ -70,6 +72,7 @@ class GenerationOrchestrator:
         self.test_value = TestValueService()
         self.traceability = TraceabilityService()
         self.review_report = ReviewReportService()
+        self.policy = RepositoryPolicyService()
 
     def generate(self, request: GenerationRequest) -> GenerationResult:
         context = {"job_id": request.job_id, "repo_path": request.repo_path, "stage": "generation"}
@@ -94,6 +97,13 @@ class GenerationOrchestrator:
             if repo_profile.support_status == "unsupported":
                 self._log_stage(request.job_id, "repo_strategy", "failed", "unsupported_repository")
                 raise UnsupportedRepositoryError(repo_profile)
+
+            repository_policy = self._run_stage(
+                request.job_id,
+                "repository_policy",
+                lambda: self.policy.load(request.repo_path),
+                completed=lambda loaded: {"source": loaded.source},
+            )
 
             runtime = self._run_stage(
                 request.job_id,
@@ -311,7 +321,14 @@ class GenerationOrchestrator:
                 lambda: self.test_value.evaluate(patches, behavior),
             )
             if test_value_report is not None:
-                review_reasons.extend(self.test_value.review_reasons(test_value_report))
+                review_reasons.extend(
+                    self.test_value.review_reasons(
+                        test_value_report,
+                        allow_full_duplicates=(
+                            repository_policy.generation.allow_full_duplicates
+                        ),
+                    )
+                )
 
             patch_result, validation, patches = self._write_validate_and_repair(
                 request=request,
@@ -324,6 +341,7 @@ class GenerationOrchestrator:
                 requires_bootstrap=repo_profile.requires_bootstrap,
                 critic=critic,
                 repair=repair,
+                policy=repository_policy,
             )
 
             coverage_report = self._assess_coverage_preservation(
@@ -597,6 +615,7 @@ class GenerationOrchestrator:
         flow_plan: Any | None = None,
         ownership_resolution: Any | None = None,
         requires_bootstrap: bool = False,
+        policy: RepositoryPolicy | None = None,
     ) -> tuple[PatchWriteResult, ValidationResult | None, PatchSet]:
         patch_result = PatchWriteResult()
         max_attempts = max(settings.max_repair_attempts, 0)
@@ -609,6 +628,7 @@ class GenerationOrchestrator:
             ownership_resolution,
             requires_bootstrap,
             attempt=0,
+            policy=policy,
         )
         if not plan_validation.passed:
             patches, validation = self._repair_patch_plan(
@@ -624,6 +644,7 @@ class GenerationOrchestrator:
                 critic=critic,
                 repair=repair,
                 max_attempts=max_attempts,
+                policy=policy,
             )
             if validation is not None and not validation.passed:
                 return patch_result, validation, patches
@@ -690,6 +711,7 @@ class GenerationOrchestrator:
                 ownership_resolution,
                 requires_bootstrap,
                 attempt=attempt,
+                policy=policy,
             )
             if not plan_validation.passed:
                 validation = plan_validation
@@ -719,6 +741,17 @@ class GenerationOrchestrator:
             passed=False,
         )
         validation.repair_attempted = max_attempts > 0
+        if policy is not None and policy.generation.rollback_failed_patch:
+            self._run_stage(
+                request.job_id,
+                "patch_rollback",
+                lambda result=patch_result: self.patch_writer.rollback(
+                    request.repo_path,
+                    result,
+                ),
+                started={"reason": "policy_rollback_failed_patch"},
+            )
+            patch_result = PatchWriteResult()
         return patch_result, validation, patches
 
     def _resolve_existing_test_context(
@@ -1194,6 +1227,7 @@ class GenerationOrchestrator:
         ownership: Any | None,
         requires_bootstrap: bool,
         attempt: int,
+        policy: RepositoryPolicy | None = None,
     ) -> ValidationResult:
         stage = "patch_plan_guard" if attempt == 0 else "repair_patch_plan_guard"
         return self._run_stage(
@@ -1207,6 +1241,7 @@ class GenerationOrchestrator:
                 ownership,
                 request.repo_path,
                 requires_bootstrap,
+                policy,
             ),
             started={"attempt": attempt},
             completed=lambda result: {
@@ -1227,6 +1262,7 @@ class GenerationOrchestrator:
         ownership: Any | None = None,
         repo_path: str = "",
         requires_bootstrap: bool = False,
+        policy: RepositoryPolicy | None = None,
     ) -> ValidationResult:
         checks = [
             self._extension_patch_check(patches, existing_test_context, flow_plan),
@@ -1236,6 +1272,8 @@ class GenerationOrchestrator:
             self._created_spec_structure_check(patches),
             self._bootstrap_scaffold_check(patches, requires_bootstrap),
         ]
+        if policy is not None:
+            checks.extend(self.policy.checks(patches, policy))
         return ValidationResult(
             passed=all(check.passed for check in checks),
             checks=checks,
@@ -1616,6 +1654,7 @@ class GenerationOrchestrator:
         flow_plan: Any | None = None,
         ownership_resolution: Any | None = None,
         requires_bootstrap: bool = False,
+        policy: RepositoryPolicy | None = None,
     ) -> tuple[PatchSet, ValidationResult | None]:
         for attempt in range(1, max_attempts + 1):
             log_event(
@@ -1660,6 +1699,7 @@ class GenerationOrchestrator:
                 ownership_resolution,
                 requires_bootstrap,
                 attempt=attempt,
+                policy=policy,
             )
             validation.repair_attempted = True
             if validation.passed:

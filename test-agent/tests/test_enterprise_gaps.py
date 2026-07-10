@@ -8,6 +8,8 @@ from app.schemas.code_patch import AppliedPatch, CodePatch, PatchSet, PatchWrite
 from app.schemas.decision_trace import DecisionTrace
 from app.schemas.functional_intent import FunctionalIntent
 from app.schemas.generation_request import GenerationRequest
+from app.policy.repository_policy_service import RepositoryPolicyService
+from app.schemas.repository_policy import GenerationPolicy, RepositoryPolicy
 from app.schemas.test_action_decision import (
     TestActionDecision as PlaywrightTestActionDecision,
 )
@@ -435,3 +437,124 @@ class TestReviewReport:
         assert "playwright_dry_run" in report.validation_summary
         assert "repair attempted" in report.validation_summary
         assert "- None identified" in report.markdown
+
+
+class TestRepositoryPolicy:
+    def test_defaults_apply_when_no_policy_file_exists(self, tmp_path: Path) -> None:
+        service = RepositoryPolicyService()
+
+        policy = service.load(str(tmp_path))
+
+        assert policy.source == "defaults"
+        assert policy.generation.allow_before_each_updates is True
+        assert policy.generation.assertion_location == "any"
+        assert policy.generation.rollback_failed_patch is True
+
+    def test_policy_file_is_loaded_without_yaml_dependency(self, tmp_path: Path) -> None:
+        service = RepositoryPolicyService()
+        policy_dir = tmp_path / ".movr"
+        policy_dir.mkdir()
+        (policy_dir / "test-agent-policy.yaml").write_text(
+            "# repository generation rules\n"
+            "generation:\n"
+            "  allow_before_each_updates: false\n"
+            "  assertion_location: spec\n"
+            "  locator_owner: page_object\n"
+            "  require_describe: true\n"
+            "  rollback_failed_patch: false\n",
+            encoding="utf-8",
+        )
+
+        policy = service.load(str(tmp_path))
+
+        assert policy.source == ".movr/test-agent-policy.yaml"
+        assert policy.generation.allow_before_each_updates is False
+        assert policy.generation.assertion_location == "spec"
+        assert policy.generation.locator_owner == "page_object"
+        assert policy.generation.require_describe is True
+        assert policy.generation.rollback_failed_patch is False
+
+    def test_policy_checks_flag_violations(self) -> None:
+        service = RepositoryPolicyService()
+        policy = RepositoryPolicy(
+            generation=GenerationPolicy(
+                allow_before_each_updates=False,
+                assertion_location="spec",
+                locator_owner="page_object",
+                require_describe=True,
+            )
+        )
+        patches = PatchSet(
+            patches=[
+                CodePatch(
+                    path="e2e/employee.spec.ts",
+                    operation="append",
+                    content=(
+                        "test.beforeEach(async ({ page }) => { await page.goto('/'); });\n"
+                        "test('x', async ({ page }) => {\n"
+                        "  await expect(page.locator('.empty')).toBeVisible();\n"
+                        "});\n"
+                    ),
+                ),
+                CodePatch(
+                    path="pages/employee.page.ts",
+                    operation="replace",
+                    start_line=1,
+                    end_line=2,
+                    content="async assertVisible() { await expect(this.row).toBeVisible(); }\n",
+                ),
+                CodePatch(
+                    path="e2e/new-flow.spec.ts",
+                    operation="create",
+                    content="import { test, expect } from '@playwright/test';\ntest('y', async () => {});\n",
+                ),
+            ]
+        )
+
+        checks = {check.name: check for check in service.checks(patches, policy)}
+
+        assert checks["policy_before_each"].passed is False
+        assert "beforeEach" in checks["policy_before_each"].output
+        assert checks["policy_assertion_location"].passed is False
+        assert "pages/employee.page.ts" in checks["policy_assertion_location"].output
+        assert checks["policy_locator_owner"].passed is False
+        assert "e2e/employee.spec.ts" in checks["policy_locator_owner"].output
+        assert checks["policy_require_describe"].passed is False
+        assert "e2e/new-flow.spec.ts" in checks["policy_require_describe"].output
+
+    def test_permissive_policy_passes_all_checks(self) -> None:
+        service = RepositoryPolicyService()
+        policy = RepositoryPolicy()
+        patches = PatchSet(
+            patches=[
+                CodePatch(
+                    path="e2e/employee.spec.ts",
+                    operation="append",
+                    content="test('x', async ({ page }) => { await expect(page.locator('.a')).toBeVisible(); });\n",
+                )
+            ]
+        )
+
+        checks = service.checks(patches, policy)
+
+        assert all(check.passed for check in checks)
+
+    def test_full_duplicates_allowed_by_policy_are_not_flagged(self) -> None:
+        value_service = TestValueService()
+        duplicate = (
+            "test('verifies an employee is created', async ({ page }) => {\n"
+            "  await page.goto('/employees');\n"
+            "  await page.click('#create');\n"
+            "  await expect(page.locator('.toast')).toHaveText('Employee created');\n"
+            "});\n"
+        )
+        patches = PatchSet(
+            patches=[CodePatch(path="e2e/employee.spec.ts", operation="append", content=duplicate)]
+        )
+        existing = [_unit_from_spec("e2e/employee.spec.ts", EXISTING_SPEC, "creates an employee")]
+
+        report = value_service.evaluate(patches, existing)
+
+        assert report.requires_approval is True
+        assert value_service.review_reasons(report, allow_full_duplicates=True) == []
+        assert value_service.review_reasons(report) != []
