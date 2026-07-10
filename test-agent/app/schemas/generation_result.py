@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 from app.schemas.coverage import CoveragePreservationReport
 from app.schemas.decision_trace import DecisionTrace
+from app.schemas.generation_manifest import GenerationManifest
 from app.schemas.repo_profile import RepoProfile
 from app.schemas.review_report import ReviewReport
 from app.schemas.test_value import TestValueReport
@@ -26,3 +27,4 @@ class GenerationResult(BaseModel):
     test_value: TestValueReport | None = None
     traceability: TraceabilityMatrix | None = None
     review_report: ReviewReport | None = None
+    manifest: GenerationManifest | None = None

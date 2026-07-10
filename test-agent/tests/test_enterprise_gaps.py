@@ -9,7 +9,10 @@ from app.schemas.decision_trace import DecisionTrace
 from app.schemas.functional_intent import FunctionalIntent
 from app.schemas.generation_request import GenerationRequest
 from app.policy.repository_policy_service import RepositoryPolicyService
+from app.schemas.repository_inventory import RepositoryInventory
 from app.schemas.repository_policy import GenerationPolicy, RepositoryPolicy
+from app.schemas.spec_placement import SpecPlacementDecision
+from app.services.generation_manifest_service import GenerationManifestService
 from app.schemas.test_action_decision import (
     TestActionDecision as PlaywrightTestActionDecision,
 )
@@ -558,3 +561,79 @@ class TestRepositoryPolicy:
         assert report.requires_approval is True
         assert value_service.review_reasons(report, allow_full_duplicates=True) == []
         assert value_service.review_reasons(report) != []
+
+
+class TestGenerationManifest:
+    def _request(self) -> GenerationRequest:
+        return GenerationRequest(
+            job_id="job-1",
+            repo_path="/tmp/repo",
+            branch="main",
+            test_case_name="Employee empty state",
+            steps=["Open employees", "Verify empty state"],
+        )
+
+    def _inventory(self) -> RepositoryInventory:
+        return RepositoryInventory(
+            repo_path="/tmp/repo",
+            repo_head="abc123",
+            file_hashes={"e2e/employee.spec.ts": "hash-1", "pages/employee.page.ts": "hash-2"},
+        )
+
+    def test_manifest_freezes_run_inputs_and_decisions(self) -> None:
+        service = GenerationManifestService()
+        placement = SpecPlacementDecision(
+            target_spec_file="e2e/employee.spec.ts", confidence=0.9
+        )
+        action = PlaywrightTestActionDecision(action="append_new_test", confidence=0.8)
+        patches = PatchSet(
+            patches=[CodePatch(path="e2e/employee.spec.ts", operation="append", content="test…")]
+        )
+
+        manifest = service.build(
+            self._request(),
+            inventory=self._inventory(),
+            policy=RepositoryPolicy(),
+            model_provider="anthropic",
+            decisions=[
+                ("spec_placement", placement),
+                ("test_action", action),
+                ("flow_merge", None),
+            ],
+            patches=patches,
+        )
+
+        assert manifest.repo_head == "abc123"
+        assert manifest.repository_snapshot_digest != ""
+        assert manifest.model_provider == "anthropic"
+        assert manifest.prompt_versions  # every prompt module fingerprinted
+        assert all(len(digest) == 12 for digest in manifest.prompt_versions.values())
+        assert manifest.settings_snapshot["max_repair_attempts"] == "2"
+        assert manifest.policy_snapshot["rollback_failed_patch"] == "True"
+        assert [decision.stage for decision in manifest.decisions] == [
+            "spec_placement",
+            "test_action",
+        ]
+        assert manifest.decisions[0].decision == "e2e/employee.spec.ts"
+        assert manifest.decisions[1].decision == "append_new_test"
+        [patch_record] = manifest.patches
+        assert patch_record.content_digest != ""
+        assert manifest.generation_fingerprint != ""
+
+    def test_same_inputs_produce_same_fingerprint_and_changed_inputs_do_not(self) -> None:
+        service = GenerationManifestService()
+
+        first = service.build(self._request(), inventory=self._inventory(), model_provider="anthropic")
+        second = service.build(self._request(), inventory=self._inventory(), model_provider="anthropic")
+        changed_repo = service.build(
+            self._request(),
+            inventory=RepositoryInventory(
+                repo_path="/tmp/repo",
+                repo_head="def456",
+                file_hashes={"e2e/employee.spec.ts": "hash-CHANGED"},
+            ),
+            model_provider="anthropic",
+        )
+
+        assert first.generation_fingerprint == second.generation_fingerprint
+        assert first.generation_fingerprint != changed_repo.generation_fingerprint

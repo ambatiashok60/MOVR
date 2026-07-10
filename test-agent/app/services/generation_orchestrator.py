@@ -34,6 +34,7 @@ from app.services.behavioral_inventory_service import BehavioralInventoryService
 from app.services.bootstrap_scaffold_service import BootstrapScaffoldService
 from app.services.code_generation_service import CodeGenerationService
 from app.services.flow_merge_service import FlowMergeService
+from app.services.generation_manifest_service import GenerationManifestService
 from app.services.inventory_service import InventoryService
 from app.services.ownership_resolution_service import OwnershipResolutionService
 from app.services.playwright_ui_intelligence_service import PlaywrightUiIntelligenceService
@@ -73,6 +74,7 @@ class GenerationOrchestrator:
         self.traceability = TraceabilityService()
         self.review_report = ReviewReportService()
         self.policy = RepositoryPolicyService()
+        self.manifest = GenerationManifestService()
 
     def generate(self, request: GenerationRequest) -> GenerationResult:
         context = {"job_id": request.job_id, "repo_path": request.repo_path, "stage": "generation"}
@@ -358,6 +360,27 @@ class GenerationOrchestrator:
                     self.traceability.review_reasons(traceability_matrix)
                 )
 
+            generation_manifest = self._run_optional_stage(
+                request.job_id,
+                "generation_manifest",
+                lambda: self.manifest.build(
+                    request,
+                    inventory=inventory,
+                    policy=repository_policy,
+                    model_provider=(
+                        settings.default_model_provider
+                        or type(runtime.llm_client).__name__
+                    ),
+                    decisions=[
+                        ("spec_placement", placement),
+                        ("test_action", action),
+                        ("flow_merge", flow_plan),
+                        ("ownership_resolution", ownership_resolution),
+                    ],
+                    patches=patches,
+                ),
+            )
+
             review_report = self._run_optional_stage(
                 request.job_id,
                 "review_report",
@@ -402,6 +425,7 @@ class GenerationOrchestrator:
                     test_value=test_value_report,
                     traceability=traceability_matrix,
                     review_report=review_report,
+                    manifest=generation_manifest,
                 ),
                 completed=lambda built: {
                     "files_changed": len(built.files_changed),
