@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 from worktop.api_agent.app.schemas.api_scenario import ApiScenario
 from worktop.api_agent.app.schemas.scenario_value import ScenarioValueReport
+from worktop.api_agent.app.schemas.traceability import TraceabilityMatrix
 
 
 class ApiScenarioGenerationResult(BaseModel):
@@ -16,3 +17,4 @@ class ApiScenarioGenerationResult(BaseModel):
     needs_review: bool = False
     review_reasons: list[str] = Field(default_factory=list)
     scenario_value: ScenarioValueReport | None = None
+    traceability: TraceabilityMatrix | None = None

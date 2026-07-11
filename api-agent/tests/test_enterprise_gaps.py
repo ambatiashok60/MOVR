@@ -5,7 +5,13 @@ from pathlib import Path
 from worktop.api_agent.app.coverage.api_coverage_service import ApiCoverageService
 from worktop.api_agent.app.schemas.api_scenario import ApiScenario
 from worktop.api_agent.app.schemas.repo_profile import RepoProfile
+from worktop.api_agent.app.schemas.api_scenario_request import GenerateApiScenariosRequest
+from worktop.api_agent.app.schemas.api_test_generation_request import (
+    GenerateApiTestCodeRequest,
+)
+from worktop.api_agent.app.schemas.generated_file import GeneratedFile
 from worktop.api_agent.app.services.scenario_value_service import ScenarioValueService
+from worktop.api_agent.app.services.traceability_service import TraceabilityService
 
 EXISTING_TEST = """import io.restassured.RestAssured;
 
@@ -160,3 +166,71 @@ class TestScenarioValueEvaluator:
 
         assert report.assessments[0].verdict == "LOW_VALUE"
         assert any("low value" in r for r in service.review_reasons(report))
+
+
+class TestRequirementTraceability:
+    def test_acceptance_criteria_map_to_scenarios(self) -> None:
+        service = TraceabilityService()
+        request = GenerateApiScenariosRequest(
+            user_story_hierarchy_id=1,
+            repo_path="/tmp/repo",
+            acceptance_criteria=[
+                "Records are returned for valid filters",
+                "Export quarterly payroll summary as PDF",
+            ],
+        )
+        scenarios = [
+            _scenario(
+                "API_TC_001",
+                "Retrieve SOH records with valid filters",
+                steps=["Call endpoint with valid filters"],
+                assertions=["Records returned", "Status code 200"],
+            )
+        ]
+
+        matrix = service.trace_scenarios(request, scenarios)
+
+        by_requirement = {t.requirement: t for t in matrix.requirements}
+        covered = by_requirement["Records are returned for valid filters"]
+        assert covered.status == "covered"
+        assert covered.covered_by == "API_TC_001"
+        assert covered.source == "scenario"
+        missing = by_requirement["Export quarterly payroll summary as PDF"]
+        assert missing.status == "missing"
+        assert matrix.complete is False
+        assert any("not traceable" in r for r in service.review_reasons(matrix))
+
+    def test_scenario_steps_map_to_generated_code(self, tmp_path: Path) -> None:
+        service = TraceabilityService()
+        test_file = tmp_path / "src" / "test" / "SohRecordsApiTest.java"
+        test_file.parent.mkdir(parents=True)
+        test_file.write_text(
+            "void returnsRecords() {\n"
+            "  // Step: call soh-records endpoint with valid employee filters\n"
+            "  // Assert: status code 200; records field is not null\n"
+            "  given().when().get(\"/api/soh-records\")\n"
+            "    .then().statusCode(200).body(\"records\", notNullValue());\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        request = GenerateApiTestCodeRequest(
+            user_story_hierarchy_id=1,
+            api_scenario_id="API_TC_001",
+            scenario_name="Retrieve SOH records",
+            repo_path=str(tmp_path),
+            scenario_steps=["Call soh-records endpoint with valid employee filters"],
+            assertions=["Status code 200", "Records field is not null"],
+        )
+        generated = [
+            GeneratedFile(
+                path="src/test/SohRecordsApiTest.java",
+                test_target="ci",
+                summary="generated",
+            )
+        ]
+
+        matrix = service.trace_code(request, generated)
+
+        assert matrix.complete is True
+        assert all(t.covered_by == "src/test/SohRecordsApiTest.java" for t in matrix.requirements)
+        assert service.review_reasons(matrix) == []

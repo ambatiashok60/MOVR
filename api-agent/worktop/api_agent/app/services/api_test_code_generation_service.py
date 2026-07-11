@@ -10,6 +10,7 @@ from worktop.api_agent.app.schemas.repo_profile import RepoProfile
 from worktop.api_agent.app.schemas.source_context import GenerationSourceContext
 from worktop.api_agent.app.coverage.api_coverage_service import ApiCoverageService
 from worktop.api_agent.app.services.api_test_file_writer import ApiTestFileWriter
+from worktop.api_agent.app.services.traceability_service import TraceabilityService
 from worktop.api_agent.app.strategies.strategy_registry import StrategyRegistry
 from worktop.api_agent.app.validation.api_test_validator import ApiTestValidator
 from worktop.api_agent.app.validation.generated_file_guard import GeneratedFileGuard
@@ -30,6 +31,7 @@ class ApiTestCodeGenerationService:
         self.file_guard = file_guard or GeneratedFileGuard()
         self.strategy_registry = strategy_registry or StrategyRegistry()
         self.coverage = ApiCoverageService()
+        self.traceability = TraceabilityService()
 
     def generate(
         self,
@@ -99,6 +101,8 @@ class ApiTestCodeGenerationService:
             self.coverage.snapshot_files(request.repo_path, touched_paths),
         )
         review_reasons.extend(self.coverage.review_reasons(coverage_report))
+        traceability = self.traceability.trace_code(request, generated_files)
+        review_reasons.extend(self.traceability.review_reasons(traceability))
 
         warnings = [*output.warnings, *guard_warnings]
         return ApiTestGenerationResult(
@@ -118,6 +122,7 @@ class ApiTestCodeGenerationService:
             needs_review=bool(review_reasons),
             review_reasons=review_reasons,
             coverage=coverage_report,
+            traceability=traceability,
         )
 
     def _generate_with_healing(

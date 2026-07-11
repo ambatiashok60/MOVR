@@ -3,6 +3,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from worktop.api_agent.app.schemas.coverage import ApiCoverageReport
+from worktop.api_agent.app.schemas.traceability import TraceabilityMatrix
 from worktop.api_agent.app.schemas.generated_file import GeneratedFile
 from worktop.api_agent.app.schemas.mock_stub_plan import MockStubPlan
 from worktop.api_agent.app.schemas.source_context import ExistingTestExample, SourceSnippet
@@ -26,3 +27,4 @@ class ApiTestGenerationResult(BaseModel):
     needs_review: bool = False
     review_reasons: list[str] = Field(default_factory=list)
     coverage: ApiCoverageReport | None = None
+    traceability: TraceabilityMatrix | None = None
