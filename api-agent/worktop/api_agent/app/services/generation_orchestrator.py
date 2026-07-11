@@ -22,6 +22,7 @@ from worktop.api_agent.app.services.api_test_code_generation_service import ApiT
 from worktop.api_agent.app.services.mock_stub_planning_service import MockStubPlanningService
 from worktop.api_agent.app.services.source_context_service import SourceContextService
 from worktop.api_agent.app.utils.logging_utils import log_exception, log_performance, log_step
+from worktop.api_agent.app.workspace.workspace_manager import WorkspaceManager
 
 AbortCheck = Callable[[], bool]
 StagePublisher = Callable[[str, str, dict[str, Any] | None], None]
@@ -33,6 +34,7 @@ class GenerationOrchestrator:
         self.repo_context = ApiRepoContextService()
         self.source_context = SourceContextService()
         self.mock_stub_planning = MockStubPlanningService()
+        self.workspaces = WorkspaceManager()
 
     @log_performance("api_agent.generate_scenarios")
     def generate_scenarios(
@@ -82,6 +84,7 @@ class GenerationOrchestrator:
             service = ApiScenarioGenerationService(ScenarioAgent(llm_client))
             result = service.generate(task_id, request, profile, repo_understanding)
             result.budget = budget.report()
+            self._apply_budget_review(result)
 
             publish(
                 "completed",
@@ -132,6 +135,27 @@ class GenerationOrchestrator:
             )
             mock_stub_plan = self.mock_stub_planning.plan(profile, source_context)
 
+            if mock_stub_plan.approval_required and not request.approve_high_risk_mocks:
+                publish(
+                    "approval_required",
+                    "High-risk mock or infrastructure plan requires explicit approval",
+                    mock_stub_plan.model_dump(),
+                )
+                return ApiTestGenerationResult(
+                    task_id=task_id,
+                    user_story_hierarchy_id=request.user_story_hierarchy_id,
+                    api_scenario_id=request.api_scenario_id,
+                    generated_files=[],
+                    summary=(
+                        "Approval required before generating high-risk infrastructure "
+                        "mocks or stubs. No files were written."
+                    ),
+                    mock_stub_plan=mock_stub_plan,
+                    warnings=mock_stub_plan.warnings,
+                    needs_review=True,
+                    review_reasons=mock_stub_plan.approval_reasons,
+                )
+
             runtime = GenerationRuntime.create(
                 task_id=task_id,
                 tenant_id=request.tenant_id,
@@ -156,15 +180,21 @@ class GenerationOrchestrator:
             self._check_abort(task_id, is_abort_requested)
             publish("generating_test_code", "Generating repository-native API tests", None)
             service = ApiTestCodeGenerationService(TestGenerationAgent(llm_client))
-            result = service.generate(
-                task_id,
-                request,
-                profile,
-                source_context=source_context,
-                mock_stub_plan=mock_stub_plan,
-                repo_understanding=repo_understanding,
-            )
+            workspace = self.workspaces.acquire(task_id, request.repo_path)
+            try:
+                result = service.generate(
+                    task_id,
+                    request,
+                    profile,
+                    source_context=source_context,
+                    mock_stub_plan=mock_stub_plan,
+                    repo_understanding=repo_understanding,
+                    workspace=workspace,
+                )
+            finally:
+                self.workspaces.release(workspace)
             result.budget = budget.report()
+            self._apply_budget_review(result)
 
             self._check_abort(task_id, is_abort_requested)
             publish(
@@ -218,3 +248,13 @@ class GenerationOrchestrator:
     def _check_abort(self, task_id: str, is_abort_requested: AbortCheck) -> None:
         if is_abort_requested():
             raise AbortRequestedError(task_id)
+
+    def _apply_budget_review(self, result) -> None:
+        report = result.budget
+        if not report or not report.review_required:
+            return
+        result.needs_review = True
+        for reason in report.exceeded_thresholds:
+            message = f"Budget estimate review: {reason}"
+            if message not in result.review_reasons:
+                result.review_reasons.append(message)

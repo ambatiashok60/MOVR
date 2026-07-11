@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from worktop.api_agent.app.security.data_governance_service import DataGovernanceService
 
 MAX_FILE_CHARS = 6000
 MAX_SEARCH_HITS = 20
@@ -53,6 +54,10 @@ class RepoExplorer:
         if not path.is_file():
             return "error: file does not exist"
         content = path.read_text(encoding="utf-8", errors="ignore")
+        released = self.governance.release_file(target, content)
+        if released is None:
+            return "error: file is restricted by the repository data policy"
+        content = released
         if len(content) > MAX_FILE_CHARS:
             return f"{content[:MAX_FILE_CHARS]}\n… [truncated]"
         return content or "(empty file)"
@@ -84,12 +89,15 @@ class RepoExplorer:
             if not path.is_file() or set(path.parts).intersection(IGNORED_DIRS):
                 continue
             relative = path.relative_to(root).as_posix()
+            if self.governance.classify(relative) == "restricted":
+                continue
             if term.lower() in relative.lower():
                 hits.append(relative)
                 continue
             try:
                 if path.stat().st_size < 300_000:
                     content = path.read_text(encoding="utf-8", errors="ignore")
+                    content = self.governance.release_file(relative, content) or ""
                     for line_number, line in enumerate(content.splitlines(), 1):
                         if term in line:
                             hits.append(f"{relative}:{line_number}: {line.strip()[:160]}")
@@ -97,3 +105,5 @@ class RepoExplorer:
             except OSError:
                 continue
         return "\n".join(hits) if hits else "(no matches)"
+    def __init__(self, governance: DataGovernanceService | None = None) -> None:
+        self.governance = governance or DataGovernanceService()

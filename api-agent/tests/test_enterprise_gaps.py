@@ -37,6 +37,19 @@ from worktop.api_agent.app.services.generation_manifest_service import (
 from worktop.api_agent.app.services.review_report_service import ReviewReportService
 from worktop.api_agent.app.services.scenario_value_service import ScenarioValueService
 from worktop.api_agent.app.services.traceability_service import TraceabilityService
+from worktop.api_agent.app.security.data_governance_service import DataGovernanceService
+from worktop.api_agent.app.tools.repo_explorer import RepoExplorer
+from worktop.api_agent.app.task_managers.api_test_generation_task_manager import (
+    ApiTestGenerationTaskManager,
+)
+from worktop.api_agent.app.schemas.task_status import TaskStatus
+from worktop.api_agent.app.workspace.workspace_manager import (
+    WorkspaceLockedError,
+    WorkspaceManager,
+)
+from worktop.api_agent.app.strategies.strategy_registry import StrategyRegistry
+from worktop.api_agent.app.services.mock_stub_planning_service import MockStubPlanningService
+from worktop.api_agent.app.schemas.source_context import GenerationSourceContext, SourceSnippet
 
 EXISTING_TEST = """import io.restassured.RestAssured;
 
@@ -441,7 +454,9 @@ class TestGenerationManifest:
 
 class TestGenerationBudget:
     def test_llm_calls_beyond_limit_escalate(self) -> None:
-        budget = GenerationBudget(limits=BudgetLimits(max_llm_calls=1))
+        budget = GenerationBudget(
+            limits=BudgetLimits(max_llm_calls=1), enforcement_mode="strict"
+        )
 
         budget.charge_llm_call(prompt_chars=10)
         with pytest.raises(BudgetExceededError) as excinfo:
@@ -472,12 +487,28 @@ class TestGenerationBudget:
         assert report.escalated is False
 
     def test_time_budget_escalates(self) -> None:
-        budget = GenerationBudget(limits=BudgetLimits(max_generation_seconds=0.0))
+        budget = GenerationBudget(
+            limits=BudgetLimits(max_generation_seconds=0.0), enforcement_mode="strict"
+        )
 
         with pytest.raises(BudgetExceededError) as excinfo:
             budget.charge_tool_call()
 
         assert "elapsed" in str(excinfo.value)
+
+    def test_review_mode_records_overage_without_blocking_generation(self) -> None:
+        budget = GenerationBudget(
+            limits=BudgetLimits(max_llm_calls=1), enforcement_mode="review"
+        )
+
+        budget.charge_llm_call(prompt_chars=10)
+        budget.charge_llm_call(prompt_chars=20)
+        report = budget.report()
+
+        assert report.review_required is True
+        assert report.enforcement_mode == "review"
+        assert report.usage.llm_calls == 2
+        assert any("llm_calls used 2 of 1" in reason for reason in report.exceeded_thresholds)
 
 
 class TestRegressionBenchmark:
@@ -572,3 +603,92 @@ class TestRegressionBenchmark:
         regressions = {r.metric for r in runner.detect_regressions(baseline, current)}
 
         assert regressions == {"scenario_plan_accuracy", "avg_latency_ms"}
+
+
+class TestWorkspaceIsolation:
+    def test_same_repository_cannot_be_written_by_two_jobs(self, tmp_path: Path) -> None:
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        manager = WorkspaceManager(workspace_root=str(tmp_path / "workspaces"))
+        first = manager.acquire("job-1", str(repo))
+        try:
+            with pytest.raises(WorkspaceLockedError):
+                manager.acquire("job-2", str(repo))
+        finally:
+            manager.release(first)
+        second = manager.acquire("job-2", str(repo))
+        manager.release(second)
+
+
+class TestApiIdempotency:
+    def test_completed_and_running_tasks_are_reused_but_failed_tasks_retry(self) -> None:
+        manager = ApiTestGenerationTaskManager()
+        try:
+            key = "tenant:story:scenario:default"
+            task_id = manager._create_job("api_test_generation", {}, key)
+            assert manager._reusable_task_id(key) == task_id
+            assert manager._reusable_task_id(key, {"repo_path": "/different"}) is None
+
+            with manager._lock:
+                manager._jobs[task_id].status = TaskStatus.COMPLETED
+            assert manager._reusable_task_id(key) == task_id
+
+            with manager._lock:
+                manager._jobs[task_id].status = TaskStatus.FAILED
+            assert manager._reusable_task_id(key) is None
+        finally:
+            manager._executor.shutdown(wait=False, cancel_futures=True)
+
+
+class TestRepositoryDataGovernance:
+    def test_restricted_files_are_blocked_and_secrets_are_redacted(self, tmp_path: Path) -> None:
+        (tmp_path / ".env").write_text("API_KEY=super-secret-value", encoding="utf-8")
+        (tmp_path / "client.py").write_text(
+            "password=hunter2secret\nname=soh-client\n", encoding="utf-8"
+        )
+        governance = DataGovernanceService()
+        explorer = RepoExplorer(governance)
+
+        blocked = explorer.read_file(tmp_path, ".env")
+        released = explorer.read_file(tmp_path, "client.py")
+
+        assert "restricted by the repository data policy" in blocked
+        assert "hunter2secret" not in released
+        assert "[REDACTED]" in released
+        assert "soh-client" in released
+        assert governance.audit.files_blocked == [".env"]
+        assert governance.audit.redactions == 1
+
+
+class TestTechnologyStrategyBoundary:
+    def test_api_registry_exposes_multiple_repository_native_strategies(self) -> None:
+        registry = StrategyRegistry()
+        names = set(registry.registered())
+
+        assert "java_spring_rest_assured" in names
+        assert "java_spring_mockmvc" in names
+        assert "python_fastapi_testclient" in names
+        assert "python_pytest_httpx" in names
+
+
+class TestAutonomousMockPlanning:
+    def test_runtime_infrastructure_requires_approval_but_produces_a_plan(self) -> None:
+        source = SourceSnippet(
+            path="src/main/java/SohController.java",
+            reason="endpoint",
+            content=(
+                "class SohController { private final KafkaTemplate kafkaTemplate; "
+                "SohController(KafkaTemplate kafkaTemplate) { this.kafkaTemplate = kafkaTemplate; } }"
+            ),
+        )
+        profile = RepoProfile(repo_path="/tmp/repo")
+
+        plan = MockStubPlanningService().plan(
+            profile, GenerationSourceContext(endpoint_sources=[source])
+        )
+
+        assert plan.risk_level == "high"
+        assert plan.approval_required is True
+        assert any("message_broker" in signal for signal in plan.runtime_signals)
+        assert plan.provisioning_actions
+        assert "do not embed credentials" in (plan.auth_strategy or "")

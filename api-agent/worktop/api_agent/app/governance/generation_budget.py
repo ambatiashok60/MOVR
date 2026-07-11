@@ -29,7 +29,11 @@ class GenerationBudget:
     can never loop forever or silently rack up spend.
     """
 
-    def __init__(self, limits: BudgetLimits | None = None) -> None:
+    def __init__(
+        self,
+        limits: BudgetLimits | None = None,
+        enforcement_mode: str | None = None,
+    ) -> None:
         self.limits = limits or BudgetLimits(
             max_llm_calls=settings.budget_max_llm_calls,
             max_tool_calls=settings.budget_max_tool_calls,
@@ -40,6 +44,8 @@ class GenerationBudget:
         self.usage = BudgetUsage()
         self._started_at = perf_counter()
         self._escalation_reason = ""
+        self.enforcement_mode = (enforcement_mode or settings.budget_enforcement_mode).lower()
+        self._exceeded_thresholds: list[str] = []
 
     def charge_llm_call(self, prompt_chars: int = 0, completion_chars: int = 0) -> None:
         self.usage.llm_calls += 1
@@ -73,6 +79,9 @@ class GenerationBudget:
             usage=self.usage.model_copy(),
             escalated=bool(self._escalation_reason),
             escalation_reason=self._escalation_reason,
+            enforcement_mode=self.enforcement_mode,
+            review_required=bool(self._exceeded_thresholds),
+            exceeded_thresholds=list(self._exceeded_thresholds),
         )
 
     def _enforce(self, name: str, used: int, limit: int) -> None:
@@ -94,13 +103,18 @@ class GenerationBudget:
 
     def _escalate(self, reason: str) -> None:
         self._escalation_reason = reason
+        if reason not in self._exceeded_thresholds:
+            self._exceeded_thresholds.append(reason)
         report = self.report()
-        logger.error(
-            "Generation budget ESCALATED: %s (usage: %s)",
+        log = logger.error if self.enforcement_mode == "strict" else logger.warning
+        log(
+            "Generation budget threshold exceeded (%s mode): %s (usage: %s)",
+            self.enforcement_mode,
             reason,
             report.usage.model_dump(),
         )
-        raise BudgetExceededError(reason, report)
+        if self.enforcement_mode == "strict":
+            raise BudgetExceededError(reason, report)
 
 
 class BudgetedLLMClient:

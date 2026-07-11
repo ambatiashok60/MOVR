@@ -17,6 +17,17 @@ class StrategyRegistry:
             PythonPytestHttpxStrategy(),
         ]
 
+    def register(self, strategy: ApiTestGenerationStrategy) -> None:
+        """Add or replace a strategy without modifying orchestration code."""
+        self._strategies = [
+            item for item in self._strategies
+            if item.strategy_name != strategy.strategy_name
+        ]
+        self._strategies.append(strategy)
+
+    def registered(self) -> list[str]:
+        return sorted(strategy.strategy_name for strategy in self._strategies)
+
     def select(self, profile: RepoProfile) -> StrategyMatch:
         matches = [
             strategy.match(profile)

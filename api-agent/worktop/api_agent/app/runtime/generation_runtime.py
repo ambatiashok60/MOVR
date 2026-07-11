@@ -5,6 +5,7 @@ from typing import Any
 
 from worktop.api_agent.app.llm.llm_client import LLMClient
 from worktop.api_agent.app.llm.model_client_factory import LLMClientFactory
+from worktop.api_agent.app.config import settings
 
 
 @dataclass(frozen=True)
@@ -33,5 +34,9 @@ class GenerationRuntime:
             repo_path=repo_path,
             branch=branch,
             db=db,
-            llm_client=factory.create(db=db, tenant_id=tenant_id),
+            llm_client=factory.create(
+                db=db,
+                tenant_id=tenant_id,
+                allow_local_fallback=settings.allow_local_llm_fallback,
+            ),
         )

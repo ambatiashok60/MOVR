@@ -24,7 +24,8 @@ class ApiTestGenerationTaskManager:
         self._jobs: dict[str, GenerationJob] = {}
         self._key_to_task_id: dict[str, str] = {}
         self._lock = Lock()
-        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="api-agent")
+        from worktop.api_agent.app.config import settings
+        self._executor = ThreadPoolExecutor(max_workers=settings.worker_count, thread_name_prefix="api-agent")
 
     def enqueue_scenario_generation(
         self,
@@ -36,6 +37,9 @@ class ApiTestGenerationTaskManager:
             request.user_story_hierarchy_id,
             request.user_story_id,
         )
+        existing = self._reusable_task_id(key, request.model_dump())
+        if existing:
+            return existing
         task_id = self._create_job("api_scenario_generation", request.model_dump(), key)
         self._executor.submit(self._run_scenario_generation, task_id, request, db)
         return task_id
@@ -51,6 +55,9 @@ class ApiTestGenerationTaskManager:
             request.api_scenario_id,
             None,
         )
+        existing = self._reusable_task_id(key, request.model_dump())
+        if existing:
+            return existing
         task_id = self._create_job("api_test_code_generation", request.model_dump(), key)
         self._executor.submit(self._run_test_code_generation, task_id, request, db)
         return task_id
@@ -67,6 +74,9 @@ class ApiTestGenerationTaskManager:
             request.testcase_id,
             request.row_id,
         )
+        existing = self._reusable_task_id(key, request.model_dump())
+        if existing:
+            return existing
         task_id = self._create_job("api_test_generation", request.model_dump(), key, task_id)
         self._executor.submit(
             self._run_test_code_generation,
@@ -138,6 +148,27 @@ class ApiTestGenerationTaskManager:
                 self._key_to_task_id[key] = task_id
         self._publish(task_id, "queued", "queued", "Task queued", {"task_type": task_type, "key": key})
         return task_id
+
+    def _reusable_task_id(
+        self,
+        key: str,
+        request_payload: dict[str, Any] | None = None,
+    ) -> str | None:
+        """Collapse repeated clicks for the same tenant/story/scenario.
+
+        Queued/running work is shared, and a completed result is replayed until
+        its repository/story key changes. Failed or aborted work may be retried.
+        """
+        with self._lock:
+            task_id = self._key_to_task_id.get(key)
+            job = self._jobs.get(task_id) if task_id else None
+            same_inputs = request_payload is None or job.request_payload == request_payload
+            if job and same_inputs and job.status in {
+                TaskStatus.QUEUED, TaskStatus.RUNNING, TaskStatus.COMPLETED
+            }:
+                log_step("api_generation_idempotent_replay", {"task_id": task_id, "key": key})
+                return task_id
+        return None
 
     def _run_scenario_generation(
         self,

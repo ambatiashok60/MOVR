@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 
 class BudgetLimits(BaseModel):
-    """Hard ceilings for one generation run; beyond them the run escalates."""
+    """Estimation thresholds; enforcement mode decides review versus blocking."""
 
     max_llm_calls: int = 40
     max_tool_calls: int = 60
@@ -28,3 +28,6 @@ class BudgetReport(BaseModel):
     usage: BudgetUsage = Field(default_factory=BudgetUsage)
     escalated: bool = False
     escalation_reason: str = ""
+    enforcement_mode: str = "review"
+    review_required: bool = False
+    exceeded_thresholds: list[str] = Field(default_factory=list)

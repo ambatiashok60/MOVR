@@ -21,6 +21,7 @@ class GenerateApiTestCodeRequest(BaseModel):
     branch: str | None = None
     run_validation: bool = True
     additional_context: str | None = None
+    approve_high_risk_mocks: bool = False
 
 
 class GenerateApiTestsRequest(BaseModel):
@@ -41,6 +42,7 @@ class GenerateApiTestsRequest(BaseModel):
     testcase_name: str | None = None
     branch: str | None = None
     run_validation: bool = True
+    approve_high_risk_mocks: bool = False
 
     def to_code_request(self) -> GenerateApiTestCodeRequest:
         scenario_name = self.testcase_name or f"{self.user_story_id or 'story'}_{self.testcase_id}"
@@ -57,4 +59,5 @@ class GenerateApiTestsRequest(BaseModel):
             branch=self.branch,
             run_validation=self.run_validation,
             additional_context=self.additional_context,
+            approve_high_risk_mocks=self.approve_high_risk_mocks,
         )

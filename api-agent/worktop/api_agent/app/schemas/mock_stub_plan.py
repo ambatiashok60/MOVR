@@ -12,3 +12,9 @@ class MockStubPlan(BaseModel):
     generated_stubs: list[str] = Field(default_factory=list)
     external_services_to_stub: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    risk_level: str = "low"
+    approval_required: bool = False
+    approval_reasons: list[str] = Field(default_factory=list)
+    runtime_signals: list[str] = Field(default_factory=list)
+    provisioning_actions: list[str] = Field(default_factory=list)
+    auth_strategy: str | None = None

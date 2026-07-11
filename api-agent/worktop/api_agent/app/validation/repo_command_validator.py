@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shlex
 import subprocess
 
 from worktop.api_agent.app.config import settings
@@ -7,6 +8,7 @@ from worktop.api_agent.app.schemas.generated_file import GeneratedFile
 from worktop.api_agent.app.schemas.repo_profile import RepoProfile
 from worktop.api_agent.app.schemas.validation_result import ValidationResult
 from worktop.api_agent.app.validation.validation_command_resolver import ValidationCommandResolver
+from worktop.api_agent.app.utils.logging_utils import log_step
 
 
 class RepoCommandValidator:
@@ -41,7 +43,13 @@ class RepoCommandValidator:
                 summary="Validation command resolved",
                 details=details,
             )
-        return self._execute(command, profile.repo_path, details)
+        log_step("api_validation_execution_started", {"command": command, "target": target})
+        result = self._execute(command, profile.repo_path, details)
+        log_step(
+            "api_validation_execution_completed",
+            {"command": command, "passed": result.passed, "summary": result.summary},
+        )
+        return result
 
     def _execute(
         self,
@@ -50,9 +58,24 @@ class RepoCommandValidator:
         details: list[str],
     ) -> ValidationResult:
         try:
+            argv = shlex.split(command)
+            if not argv or any(token in command for token in (";", "&&", "||", "|", "`", "$(")):
+                return ValidationResult(
+                    passed=False,
+                    command=command,
+                    summary="Unsafe validation command rejected",
+                    details=[*details, "Shell composition is not allowed for autonomous execution."],
+                )
+            if argv[0] not in settings.validation_allowed_executables:
+                return ValidationResult(
+                    passed=False,
+                    command=command,
+                    summary="Unapproved validation executable rejected",
+                    details=[*details, f"Executable `{argv[0]}` is not in the autonomous execution allowlist."],
+                )
             completed = subprocess.run(
-                command,
-                shell=True,
+                argv,
+                shell=False,
                 cwd=repo_path,
                 capture_output=True,
                 text=True,

@@ -19,6 +19,7 @@ from worktop.api_agent.app.services.traceability_service import TraceabilityServ
 from worktop.api_agent.app.strategies.strategy_registry import StrategyRegistry
 from worktop.api_agent.app.validation.api_test_validator import ApiTestValidator
 from worktop.api_agent.app.validation.generated_file_guard import GeneratedFileGuard
+from worktop.api_agent.app.workspace.workspace_manager import JobWorkspace
 
 
 class ApiTestCodeGenerationService:
@@ -40,6 +41,8 @@ class ApiTestCodeGenerationService:
         self.review_reports = ReviewReportService()
         self.policy = RepositoryPolicyService()
         self.manifests = GenerationManifestService()
+        from worktop.api_agent.app.workspace.workspace_manager import WorkspaceManager
+        self.workspaces = WorkspaceManager()
 
     def generate(
         self,
@@ -49,6 +52,7 @@ class ApiTestCodeGenerationService:
         source_context: GenerationSourceContext | None = None,
         mock_stub_plan: MockStubPlan | None = None,
         repo_understanding=None,
+        workspace: JobWorkspace | None = None,
     ) -> ApiTestGenerationResult:
         output, guard_warnings, review_reasons = self._generate_with_healing(
             request,
@@ -79,7 +83,11 @@ class ApiTestCodeGenerationService:
         )
         target_paths = [file.relative_path for file in output.files]
         coverage_before = self.coverage.snapshot_files(request.repo_path, target_paths)
+        if workspace is not None:
+            self.workspaces.snapshot_targets(workspace, target_paths)
         generated_files = self.file_writer.write(request.repo_path, output)
+        if workspace is not None:
+            self.workspaces.record_files(workspace, generated_files)
         validation = (
             self.validator.validate(
                 request.repo_path,

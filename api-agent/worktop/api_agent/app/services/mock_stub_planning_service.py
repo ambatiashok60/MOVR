@@ -5,6 +5,7 @@ from worktop.api_agent.app.schemas.repo_profile import RepoProfile
 from worktop.api_agent.app.schemas.source_context import GenerationSourceContext
 from worktop.api_agent.app.tools.dependency_scanner_tool import DependencyScannerTool
 from worktop.api_agent.app.tools.mock_stub_scanner_tool import MockStubScannerTool
+from worktop.api_agent.app.utils.logging_utils import log_step
 
 
 class MockStubPlanningService:
@@ -31,14 +32,61 @@ class MockStubPlanningService:
             warnings.append("Dependencies were detected but no mock/stub strategy was confidently found.")
         if not dependencies:
             warnings.append("No controller/route dependencies were detected for mock planning.")
-        return MockStubPlan(
+        runtime_signals = [
+            f"{dep.dependency_kind}:{dep.name}"
+            for dep in dependencies
+            if dep.dependency_kind in {
+                "message_broker", "cloud_service", "secret_store",
+                "dynamic_configuration", "dynamic_runtime",
+            }
+        ]
+        high_risk = [
+            dep for dep in dependencies
+            if dep.dependency_kind in {"message_broker", "cloud_service", "secret_store"}
+        ]
+        approval_reasons = [
+            f"{dep.dependency_kind} `{dep.name}` may require external infrastructure or credentials."
+            for dep in high_risk
+        ]
+        provisioning_actions = [
+            f"Create an isolated test double/container for {dep.name}; never connect to production."
+            for dep in high_risk
+        ]
+        auth_helpers = profile.team_strategy.auth_helpers
+        auth_strategy = (
+            f"Reuse repository auth helper `{auth_helpers[0]}`"
+            if auth_helpers else
+            "Generate an isolated fake identity/token provider; do not embed credentials."
+        )
+        if not auth_helpers:
+            warnings.append("No repository-native authentication helper was detected.")
+        plan = MockStubPlan(
             strategy=strategy,
             reused_helpers=reused_helpers,
             dependencies_to_mock=dependencies,
             generated_stubs=generated_stubs,
             external_services_to_stub=external_services,
             warnings=warnings,
+            risk_level="high" if high_risk else ("medium" if dependencies else "low"),
+            approval_required=bool(high_risk),
+            approval_reasons=approval_reasons,
+            runtime_signals=runtime_signals,
+            provisioning_actions=provisioning_actions,
+            auth_strategy=auth_strategy,
         )
+        log_step(
+            "api_mock_stub_plan_completed",
+            {
+                "strategy": plan.strategy,
+                "dependency_count": len(plan.dependencies_to_mock),
+                "reused_helper_count": len(plan.reused_helpers),
+                "generated_stub_count": len(plan.generated_stubs),
+                "risk_level": plan.risk_level,
+                "approval_required": plan.approval_required,
+                "runtime_signal_count": len(plan.runtime_signals),
+            },
+        )
+        return plan
 
     def _reused_helpers(self, profile: RepoProfile) -> list[str]:
         helpers = [
