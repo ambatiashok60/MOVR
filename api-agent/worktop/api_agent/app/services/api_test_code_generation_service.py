@@ -8,6 +8,7 @@ from worktop.api_agent.app.schemas.api_test_generation_result import ApiTestGene
 from worktop.api_agent.app.schemas.mock_stub_plan import MockStubPlan
 from worktop.api_agent.app.schemas.repo_profile import RepoProfile
 from worktop.api_agent.app.schemas.source_context import GenerationSourceContext
+from worktop.api_agent.app.coverage.api_coverage_service import ApiCoverageService
 from worktop.api_agent.app.services.api_test_file_writer import ApiTestFileWriter
 from worktop.api_agent.app.strategies.strategy_registry import StrategyRegistry
 from worktop.api_agent.app.validation.api_test_validator import ApiTestValidator
@@ -28,6 +29,7 @@ class ApiTestCodeGenerationService:
         self.validator = validator or ApiTestValidator()
         self.file_guard = file_guard or GeneratedFileGuard()
         self.strategy_registry = strategy_registry or StrategyRegistry()
+        self.coverage = ApiCoverageService()
 
     def generate(
         self,
@@ -55,6 +57,8 @@ class ApiTestCodeGenerationService:
                 "coverage; they must be reviewed and completed before merging."
             )
 
+        target_paths = [file.relative_path for file in output.files]
+        coverage_before = self.coverage.snapshot_files(request.repo_path, target_paths)
         generated_files = self.file_writer.write(request.repo_path, output)
         validation = (
             self.validator.validate(
@@ -85,6 +89,17 @@ class ApiTestCodeGenerationService:
                     "Generated tests failed execution after repair; the failure "
                     "output is attached to the validation details."
                 )
+        # Compare after any execution-repair rewrite so the report reflects
+        # what actually landed on disk.
+        touched_paths = sorted(
+            {*target_paths, *(file.relative_path for file in output.files)}
+        )
+        coverage_report = self.coverage.compare(
+            coverage_before,
+            self.coverage.snapshot_files(request.repo_path, touched_paths),
+        )
+        review_reasons.extend(self.coverage.review_reasons(coverage_report))
+
         warnings = [*output.warnings, *guard_warnings]
         return ApiTestGenerationResult(
             task_id=task_id,
@@ -102,6 +117,7 @@ class ApiTestCodeGenerationService:
             warnings=warnings,
             needs_review=bool(review_reasons),
             review_reasons=review_reasons,
+            coverage=coverage_report,
         )
 
     def _generate_with_healing(
