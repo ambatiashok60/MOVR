@@ -3,6 +3,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from worktop.api_agent.app.schemas.api_scenario import ApiScenario
+from worktop.api_agent.app.schemas.generation_budget import BudgetReport
 from worktop.api_agent.app.schemas.generation_manifest import GenerationManifest
 from worktop.api_agent.app.schemas.scenario_value import ScenarioValueReport
 from worktop.api_agent.app.schemas.traceability import TraceabilityMatrix
@@ -20,3 +21,4 @@ class ApiScenarioGenerationResult(BaseModel):
     scenario_value: ScenarioValueReport | None = None
     traceability: TraceabilityMatrix | None = None
     manifest: GenerationManifest | None = None
+    budget: BudgetReport | None = None

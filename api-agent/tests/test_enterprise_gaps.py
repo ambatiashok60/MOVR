@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from worktop.api_agent.app.coverage.api_coverage_service import ApiCoverageService
+from worktop.api_agent.app.governance.generation_budget import (
+    BudgetedLLMClient,
+    BudgetExceededError,
+    GenerationBudget,
+)
+from worktop.api_agent.app.schemas.generation_budget import BudgetLimits
 from worktop.api_agent.app.schemas.api_scenario import ApiScenario
 from worktop.api_agent.app.schemas.repo_profile import RepoProfile
 from worktop.api_agent.app.schemas.api_scenario_request import GenerateApiScenariosRequest
@@ -417,3 +425,44 @@ class TestGenerationManifest:
 
         assert first.generation_fingerprint == second.generation_fingerprint
         assert first.generation_fingerprint != changed.generation_fingerprint
+
+
+class TestGenerationBudget:
+    def test_llm_calls_beyond_limit_escalate(self) -> None:
+        budget = GenerationBudget(limits=BudgetLimits(max_llm_calls=1))
+
+        budget.charge_llm_call(prompt_chars=10)
+        with pytest.raises(BudgetExceededError) as excinfo:
+            budget.charge_llm_call(prompt_chars=10)
+
+        assert "llm_calls used 2 of 1" in str(excinfo.value)
+        assert excinfo.value.report.escalated is True
+
+    def test_budgeted_client_charges_model_and_repository_reads(self) -> None:
+        class FakeClient:
+            def complete(self, prompt: str) -> str:
+                return "ok"
+
+            def complete_structured(self, prompt: str, response_model: type) -> object:
+                return object()
+
+        budget = GenerationBudget(limits=BudgetLimits())
+        client = BudgetedLLMClient(FakeClient(), budget)
+
+        client.complete("prompt")
+        client.complete_structured(prompt="structured", response_model=object)
+        client.charge_repository_read()
+        report = budget.report()
+
+        assert report.usage.llm_calls == 2
+        assert report.usage.repository_reads == 1
+        assert report.usage.prompt_chars == len("prompt") + len("structured")
+        assert report.escalated is False
+
+    def test_time_budget_escalates(self) -> None:
+        budget = GenerationBudget(limits=BudgetLimits(max_generation_seconds=0.0))
+
+        with pytest.raises(BudgetExceededError) as excinfo:
+            budget.charge_tool_call()
+
+        assert "elapsed" in str(excinfo.value)

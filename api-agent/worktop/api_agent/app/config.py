@@ -11,6 +11,11 @@ class Settings(BaseSettings):
     max_generation_repair_attempts: int = 2
     execution_timeout_seconds: int = 300
     max_execution_repair_attempts: int = 1
+    budget_max_llm_calls: int = 40
+    budget_max_tool_calls: int = 60
+    budget_max_repository_reads: int = 200
+    budget_max_prompt_chars: int = 1_500_000
+    budget_max_generation_seconds: float = 900.0
 
 
 settings = Settings()

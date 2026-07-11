@@ -6,6 +6,11 @@ from worktop.api_agent.app.agents.repo_discovery_agent import RepoDiscoveryAgent
 from worktop.api_agent.app.agents.scenario_agent import ScenarioAgent
 from worktop.api_agent.app.agents.test_generation_agent import TestGenerationAgent
 from worktop.api_agent.app.errors import AbortRequestedError
+from worktop.api_agent.app.governance.generation_budget import (
+    BudgetedLLMClient,
+    BudgetExceededError,
+    GenerationBudget,
+)
 from worktop.api_agent.app.runtime.generation_runtime import GenerationRuntime
 from worktop.api_agent.app.schemas.api_scenario_request import GenerateApiScenariosRequest
 from worktop.api_agent.app.schemas.api_scenario_result import ApiScenarioGenerationResult
@@ -61,18 +66,22 @@ class GenerationOrchestrator:
                 db=self.db,
             )
 
+            budget = GenerationBudget()
+            llm_client = BudgetedLLMClient(runtime.llm_client, budget)
+
             self._check_abort(task_id, is_abort_requested)
             publish(
                 "discovering_repository",
                 "Exploring repository conventions with the discovery agent",
                 None,
             )
-            repo_understanding = self._discover(runtime, request.repo_path)
+            repo_understanding = self._discover(llm_client, request.repo_path)
 
             self._check_abort(task_id, is_abort_requested)
             publish("generating_scenarios", "Generating API test scenarios", None)
-            service = ApiScenarioGenerationService(ScenarioAgent(runtime.llm_client))
+            service = ApiScenarioGenerationService(ScenarioAgent(llm_client))
             result = service.generate(task_id, request, profile, repo_understanding)
+            result.budget = budget.report()
 
             publish(
                 "completed",
@@ -137,14 +146,16 @@ class GenerationOrchestrator:
                 "Exploring repository conventions with the discovery agent",
                 None,
             )
-            repo_understanding = self._discover(runtime, request.repo_path)
+            budget = GenerationBudget()
+            llm_client = BudgetedLLMClient(runtime.llm_client, budget)
+            repo_understanding = self._discover(llm_client, request.repo_path)
 
             self._check_abort(task_id, is_abort_requested)
             publish("selecting_generation_strategy", "Selecting repository-native generation strategy", None)
 
             self._check_abort(task_id, is_abort_requested)
             publish("generating_test_code", "Generating repository-native API tests", None)
-            service = ApiTestCodeGenerationService(TestGenerationAgent(runtime.llm_client))
+            service = ApiTestCodeGenerationService(TestGenerationAgent(llm_client))
             result = service.generate(
                 task_id,
                 request,
@@ -153,6 +164,7 @@ class GenerationOrchestrator:
                 mock_stub_plan=mock_stub_plan,
                 repo_understanding=repo_understanding,
             )
+            result.budget = budget.report()
 
             self._check_abort(task_id, is_abort_requested)
             publish(
@@ -190,10 +202,15 @@ class GenerationOrchestrator:
             log_exception(exc, context=context)
             raise
 
-    def _discover(self, runtime: GenerationRuntime, repo_path: str):
-        """Best-effort model-directed discovery; failure never blocks generation."""
+    def _discover(self, llm_client, repo_path: str):
+        """Best-effort model-directed discovery; failure never blocks generation.
+
+        Budget escalations are the one exception: they must stop the run.
+        """
         try:
-            return RepoDiscoveryAgent(runtime.llm_client).discover(repo_path)
+            return RepoDiscoveryAgent(llm_client).discover(repo_path)
+        except BudgetExceededError:
+            raise
         except Exception as exc:
             log_exception(exc, context={"stage": "repo_discovery", "repo_path": repo_path})
             return None

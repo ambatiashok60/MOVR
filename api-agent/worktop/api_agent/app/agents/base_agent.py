@@ -89,7 +89,10 @@ class BaseAgent:
                 return turn.output
             if not turn.requests:
                 break
+            charge_repository_read = getattr(self.llm, "charge_repository_read", None)
             for request in turn.requests[:max_requests_per_turn]:
+                if charge_repository_read is not None:
+                    charge_repository_read()
                 transcript.append(explorer.execute(root, request))
         raise RuntimeError(
             f"{self.agent_name} exploration loop ended without producing output"
