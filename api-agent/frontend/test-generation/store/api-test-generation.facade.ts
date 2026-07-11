@@ -136,11 +136,12 @@ export class ApiTestGenerationFacade {
           const result = this.api.extractScenarioResult(job);
           if (result) this.store.scenarios.set(result.scenarios.map(toApiScenarioTableRow));
         } else if (job.result && !('scenarios' in job.result)) {
+          const codeResult = job.result;
           this.store.generatingCodeForId.set(null);
-          this.store.generatedResult.set(job.result);
+          this.store.generatedResult.set(codeResult);
           this.store.pendingApprovalRow.set(
-            job.result.mock_stub_plan?.approval_required && !job.result.generated_files.length
-              ? this.store.scenarios().find((row) => row.id === job.result?.api_scenario_id) ?? null
+            codeResult.mock_stub_plan?.approval_required && !codeResult.generated_files.length
+              ? this.store.scenarios().find((row) => row.id === codeResult.api_scenario_id) ?? null
               : null,
           );
         }

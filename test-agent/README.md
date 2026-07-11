@@ -1291,3 +1291,7 @@ All imports are rooted at `worktop.test_agent` (matching the wider worktop
 platform layout, e.g. `worktop.core_services.app...`); the service package
 lives at `worktop/test_agent/app` and the shared logging utility at
 `worktop/test_agent/utils/logging.py`.
+# Documentation
+
+- [`FUNCTIONAL_GUIDE.md`](FUNCTIONAL_GUIDE.md) — product behavior and end-to-end generation flow.
+- [`TECHNICAL_ARCHITECTURE.md`](TECHNICAL_ARCHITECTURE.md) — backend architecture, contracts and wiring.

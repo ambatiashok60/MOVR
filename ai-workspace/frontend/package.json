@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "start": "ng serve --host 127.0.0.1 --port 4200",
+    "start": "ng serve --host 127.0.0.1 --port 4200 --proxy-config proxy.conf.json",
     "build": "ng build",
     "typecheck": "tsc --noEmit -p tsconfig.app.json"
   },
@@ -28,5 +28,7 @@
     "@angular/compiler-cli": "^18.2.0",
     "typescript": "~5.5.4"
   },
-  "engines": { "node": ">=18.19" }
+  "engines": {
+    "node": ">=18.19"
+  }
 }

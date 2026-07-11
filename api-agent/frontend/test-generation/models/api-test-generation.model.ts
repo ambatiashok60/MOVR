@@ -1,4 +1,8 @@
-import { ApiScenario, ExecutionTarget } from './api-scenario.model';
+import {
+  ApiScenario,
+  ApiScenarioGenerationResult,
+  ExecutionTarget,
+} from './api-scenario.model';
 
 export type ApiGenerationTaskStatus =
   | 'queued'

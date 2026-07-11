@@ -23,7 +23,13 @@
     </button>
   </nav>
 
-  <app-functional-test-gen *ngIf="activeTab === 'functional'"></app-functional-test-gen>
+  <app-functional-test-gen
+    *ngIf="activeTab === 'functional'"
+    [selectedStory]="selectedStory"
+    [tenantId]="tenantId"
+    [repoPath]="repoPath"
+    [branch]="branch"
+  ></app-functional-test-gen>
   <app-api-test-gen
     *ngIf="activeTab === 'api'"
     [selectedStory]="selectedStory"

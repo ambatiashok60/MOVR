@@ -212,3 +212,7 @@ The important remaining integration points are:
   backend instances need to see the same AI Workspace sessions/reviews.
 - Run the frontend against the host Angular/PrimeNG project and resolve version
   differences.
+# Documentation
+
+- [`FUNCTIONAL_GUIDE.md`](FUNCTIONAL_GUIDE.md) — Ask, Agent, discovery, review and Apply behavior.
+- [`TECHNICAL_ARCHITECTURE.md`](TECHNICAL_ARCHITECTURE.md) — backend/frontend architecture, contracts and integration.

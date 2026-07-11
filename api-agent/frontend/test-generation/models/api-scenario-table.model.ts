@@ -1,11 +1,8 @@
-import { ApiScenario, ExecutionTarget } from './api-scenario.model';
+import { ApiScenario, ApiScenarioDependencyRef, ExecutionTarget } from './api-scenario.model';
 
 export type ApiScenarioStatus = 'Draft' | 'Generating' | 'Generated' | 'Failed' | string;
 
-export interface ApiScenarioDependency {
-  label: string;
-  kind: 'database' | 'authentication' | 'service' | 'other';
-}
+export type ApiScenarioDependency = ApiScenarioDependencyRef;
 
 /** Stable, display-only contract consumed by the portable table component. */
 export interface ApiScenarioTableRow {
@@ -29,9 +26,7 @@ export function toApiScenarioTableRow(scenario: ApiScenario): ApiScenarioTableRo
     method: scenario.method || '-',
     type: scenario.scenario_type,
     target: scenario.execution_target,
-    // The scenario-generation API does not currently return structured dependencies.
-    // HOST APP: enrich this array from story/repository analysis if that data already exists.
-    dependencies: [],
+    dependencies: scenario.dependencies ?? [],
     priority: scenario.priority,
     status: 'Draft',
     source: scenario,

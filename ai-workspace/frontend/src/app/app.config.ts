@@ -7,7 +7,11 @@ import { provideRouter } from '@angular/router';
 // theming differently (a global stylesheet import instead of a provider).
 import { providePrimeNG } from 'primeng/config';
 
+import { provideApiTestGenerationMocks } from '@api-test-generation/mocks/provide-api-test-generation-mocks';
+import { provideTestAgentMocks } from '@api-test-generation/functional-test-gen/mocks/provide-test-agent-mocks';
+
 import { routes } from './app.routes';
+import { DEMO } from './demo.config';
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -15,5 +19,7 @@ export const appConfig: ApplicationConfig = {
     provideRouter(routes),
     provideHttpClient(),
     providePrimeNG({ ripple: true }),
+    ...(DEMO.useTestGenMocks ? provideApiTestGenerationMocks() : []),
+    ...(DEMO.useFunctionalTestGenMocks ? provideTestAgentMocks() : []),
   ],
 };
