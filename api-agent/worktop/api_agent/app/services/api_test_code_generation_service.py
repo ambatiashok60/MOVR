@@ -10,6 +10,7 @@ from worktop.api_agent.app.schemas.repo_profile import RepoProfile
 from worktop.api_agent.app.schemas.source_context import GenerationSourceContext
 from worktop.api_agent.app.coverage.api_coverage_service import ApiCoverageService
 from worktop.api_agent.app.services.api_test_file_writer import ApiTestFileWriter
+from worktop.api_agent.app.services.review_report_service import ReviewReportService
 from worktop.api_agent.app.services.traceability_service import TraceabilityService
 from worktop.api_agent.app.strategies.strategy_registry import StrategyRegistry
 from worktop.api_agent.app.validation.api_test_validator import ApiTestValidator
@@ -32,6 +33,7 @@ class ApiTestCodeGenerationService:
         self.strategy_registry = strategy_registry or StrategyRegistry()
         self.coverage = ApiCoverageService()
         self.traceability = TraceabilityService()
+        self.review_reports = ReviewReportService()
 
     def generate(
         self,
@@ -104,6 +106,24 @@ class ApiTestCodeGenerationService:
         traceability = self.traceability.trace_code(request, generated_files)
         review_reasons.extend(self.traceability.review_reasons(traceability))
 
+        review_report = self.review_reports.build(
+            request,
+            generated_files=generated_files,
+            strategy_name=output.strategy_name,
+            strategy_reasons=output.strategy_reasons,
+            mock_stub_plan=mock_stub_plan,
+            reused_example_paths=[
+                example.path
+                for example in (
+                    source_context.existing_test_examples if source_context else []
+                )
+            ],
+            validation=validation,
+            coverage=coverage_report,
+            traceability=traceability,
+            review_reasons=review_reasons,
+        )
+
         warnings = [*output.warnings, *guard_warnings]
         return ApiTestGenerationResult(
             task_id=task_id,
@@ -123,6 +143,7 @@ class ApiTestCodeGenerationService:
             review_reasons=review_reasons,
             coverage=coverage_report,
             traceability=traceability,
+            review_report=review_report,
         )
 
     def _generate_with_healing(

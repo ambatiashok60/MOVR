@@ -10,6 +10,7 @@ from worktop.api_agent.app.schemas.api_test_generation_request import (
     GenerateApiTestCodeRequest,
 )
 from worktop.api_agent.app.schemas.generated_file import GeneratedFile
+from worktop.api_agent.app.services.review_report_service import ReviewReportService
 from worktop.api_agent.app.services.scenario_value_service import ScenarioValueService
 from worktop.api_agent.app.services.traceability_service import TraceabilityService
 
@@ -234,3 +235,57 @@ class TestRequirementTraceability:
         assert matrix.complete is True
         assert all(t.covered_by == "src/test/SohRecordsApiTest.java" for t in matrix.requirements)
         assert service.review_reasons(matrix) == []
+
+
+class TestApiReviewReport:
+    def test_report_condenses_generation_into_reviewable_sections(
+        self, tmp_path: Path
+    ) -> None:
+        service = ReviewReportService()
+        test_file = tmp_path / "src" / "test" / "SohRecordsApiTest.java"
+        test_file.parent.mkdir(parents=True)
+        test_file.write_text(EXISTING_TEST, encoding="utf-8")
+        request = GenerateApiTestCodeRequest(
+            user_story_hierarchy_id=1,
+            api_scenario_id="API_TC_001",
+            scenario_name="Retrieve SOH records",
+            repo_path=str(tmp_path),
+            method="GET",
+            endpoint="/api/soh-records",
+        )
+        generated = [
+            GeneratedFile(
+                path="src/test/SohRecordsApiTest.java",
+                test_target="ci",
+                summary="Integration test for SOH records retrieval",
+            )
+        ]
+
+        report = service.build(
+            request,
+            generated_files=generated,
+            strategy_name="java_spring_rest_assured",
+            strategy_reasons=["RestAssured detected in build.gradle"],
+            reused_example_paths=["src/test/ExistingApiTest.java"],
+            validation=None,
+            review_reasons=["Scenario targets an undetected endpoint."],
+        )
+
+        assert "GET /api/soh-records" in report.summary
+        assert report.strategy == "java_spring_rest_assured"
+        assert report.files_changed[0].path == "src/test/SohRecordsApiTest.java"
+        assert any("statusCode(200)" in a for a in report.assertions_added)
+        assert report.validation_summary == "Validation was not run."
+        assert report.remaining_risks == ["Scenario targets an undetected endpoint."]
+        for heading in (
+            "# API Generation Review Report",
+            "## Files Changed",
+            "## Strategy",
+            "## Why this strategy",
+            "## Mocks & Stubs Planned",
+            "## Examples Reused",
+            "## Assertions Added",
+            "## Validation",
+            "## Remaining Risks",
+        ):
+            assert heading in report.markdown
