@@ -6,12 +6,18 @@ from worktop.api_agent.app.schemas.execution_target import ExecutionTarget
 from worktop.api_agent.app.schemas.api_scenario_request import GenerateApiScenariosRequest
 from worktop.api_agent.app.schemas.api_scenario_result import ApiScenarioGenerationResult
 from worktop.api_agent.app.schemas.repo_profile import RepoProfile
+from worktop.api_agent.app.services.scenario_value_service import ScenarioValueService
 from worktop.api_agent.app.utils.logging_utils import log_step
 
 
 class ApiScenarioGenerationService:
-    def __init__(self, agent: ScenarioAgent) -> None:
+    def __init__(
+        self,
+        agent: ScenarioAgent,
+        value_service: ScenarioValueService | None = None,
+    ) -> None:
         self.agent = agent
+        self.value_service = value_service or ScenarioValueService()
 
     def generate(
         self,
@@ -29,6 +35,8 @@ class ApiScenarioGenerationService:
                 "Scenario plan is a deterministic scaffold, not story-derived "
                 "coverage; it must be reviewed before use."
             )
+        scenario_value = self.value_service.evaluate(scenarios, profile)
+        review_reasons.extend(self.value_service.review_reasons(scenario_value))
         warnings = [*profile.warnings, *output.warnings, *guard_warnings]
         return ApiScenarioGenerationResult(
             task_id=task_id,
@@ -39,6 +47,7 @@ class ApiScenarioGenerationService:
             warnings=warnings,
             needs_review=bool(review_reasons),
             review_reasons=review_reasons,
+            scenario_value=scenario_value,
         )
 
     def _guard_scenarios(

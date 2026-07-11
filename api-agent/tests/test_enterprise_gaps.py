@@ -3,6 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from worktop.api_agent.app.coverage.api_coverage_service import ApiCoverageService
+from worktop.api_agent.app.schemas.api_scenario import ApiScenario
+from worktop.api_agent.app.schemas.repo_profile import RepoProfile
+from worktop.api_agent.app.services.scenario_value_service import ScenarioValueService
 
 EXISTING_TEST = """import io.restassured.RestAssured;
 
@@ -81,3 +84,79 @@ class TestApiCoveragePreservation:
 
         assert [entry.file_path for entry in report.added] == ["NewApiTest.java"]
         assert report.coverage_preserved is True
+
+
+def _scenario(
+    scenario_id: str,
+    name: str,
+    *,
+    endpoint: str = "/api/soh-records",
+    method: str = "GET",
+    steps: list[str] | None = None,
+    assertions: list[str] | None = None,
+) -> ApiScenario:
+    return ApiScenario(
+        api_scenario_id=scenario_id,
+        scenario_name=name,
+        scenario_type="positive",
+        method=method,
+        endpoint=endpoint,
+        reason="test",
+        scenario_steps=steps if steps is not None else ["Call the endpoint"],
+        assertions=assertions
+        if assertions is not None
+        else ["Status code 200", "Records list is not empty"],
+    )
+
+
+class TestScenarioValueEvaluator:
+    def test_intra_batch_duplicate_is_flagged_and_consolidated(self) -> None:
+        service = ScenarioValueService()
+        first = _scenario("API_TC_001", "Retrieve SOH records with valid filters")
+        duplicate = _scenario(
+            "API_TC_002",
+            "Verify SOH records retrieval again",
+            steps=["Call the endpoint"],
+            assertions=["Status code 200", "Records list is not empty"],
+        )
+        profile = RepoProfile(repo_path="")
+
+        report = service.evaluate([first, duplicate], profile)
+
+        by_id = {a.api_scenario_id: a for a in report.assessments}
+        assert by_id["API_TC_001"].verdict == "NEW_COVERAGE"
+        assert by_id["API_TC_002"].verdict == "FULL_DUPLICATE"
+        assert by_id["API_TC_002"].duplicate_of == "API_TC_001"
+        assert by_id["API_TC_002"].duplicate_source == "generated_scenario"
+        assert report.requires_approval is True
+        assert any("approval required" in r for r in service.review_reasons(report))
+
+        kept, dropped = service.consolidate([first, duplicate], report)
+        assert [s.api_scenario_id for s in kept] == ["API_TC_001"]
+        assert [a.api_scenario_id for a in dropped] == ["API_TC_002"]
+
+    def test_distinct_scenarios_are_new_coverage(self) -> None:
+        service = ScenarioValueService()
+        positive = _scenario("API_TC_001", "Retrieve SOH records")
+        negative = _scenario(
+            "API_TC_002",
+            "Invalid employeeId returns 400",
+            endpoint="/api/soh-records",
+            steps=["Call the endpoint with an invalid employeeId"],
+            assertions=["Status code 400", "Error message mentions employeeId"],
+        )
+
+        report = service.evaluate([positive, negative], RepoProfile(repo_path=""))
+
+        verdicts = {a.api_scenario_id: a.verdict for a in report.assessments}
+        assert verdicts["API_TC_002"] in ("NEW_COVERAGE", "MEANINGFUL_VARIATION")
+        assert report.requires_approval is False
+
+    def test_assertionless_scenario_is_low_value(self) -> None:
+        service = ScenarioValueService()
+        hollow = _scenario("API_TC_003", "Just call it", assertions=[])
+
+        report = service.evaluate([hollow], RepoProfile(repo_path=""))
+
+        assert report.assessments[0].verdict == "LOW_VALUE"
+        assert any("low value" in r for r in service.review_reasons(report))

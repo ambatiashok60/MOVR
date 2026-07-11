@@ -3,6 +3,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from worktop.api_agent.app.schemas.api_scenario import ApiScenario
+from worktop.api_agent.app.schemas.scenario_value import ScenarioValueReport
 
 
 class ApiScenarioGenerationResult(BaseModel):
@@ -14,3 +15,4 @@ class ApiScenarioGenerationResult(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     needs_review: bool = False
     review_reasons: list[str] = Field(default_factory=list)
+    scenario_value: ScenarioValueReport | None = None
