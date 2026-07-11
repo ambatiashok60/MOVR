@@ -15,6 +15,7 @@
 13. [Internal and external dependency graphs](13-internal-external-dependency-graphs.md)
 14. [Frontend and backend service dependency map](14-service-dependency-map.md)
 15. [Task manager, frontend and ORM portability](15-task-frontend-persistence-portability.md)
+16. [Integration: persistence, ORM, and cross-service dependency graph](16-integration-persistence-and-dependency-graph.md)
 
 The shared worker/SSE roadmap and its final documentation phase are in
 [`../../ASYNC_EXECUTION_IMPLEMENTATION_PLAN.md`](../../ASYNC_EXECUTION_IMPLEMENTATION_PLAN.md).
