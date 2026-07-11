@@ -9,6 +9,7 @@ from worktop.api_agent.app.schemas.mock_stub_plan import MockStubPlan
 from worktop.api_agent.app.schemas.repo_profile import RepoProfile
 from worktop.api_agent.app.schemas.source_context import GenerationSourceContext
 from worktop.api_agent.app.coverage.api_coverage_service import ApiCoverageService
+from worktop.api_agent.app.policy.repository_policy_service import RepositoryPolicyService
 from worktop.api_agent.app.services.api_test_file_writer import ApiTestFileWriter
 from worktop.api_agent.app.services.review_report_service import ReviewReportService
 from worktop.api_agent.app.services.traceability_service import TraceabilityService
@@ -34,6 +35,7 @@ class ApiTestCodeGenerationService:
         self.coverage = ApiCoverageService()
         self.traceability = TraceabilityService()
         self.review_reports = ReviewReportService()
+        self.policy = RepositoryPolicyService()
 
     def generate(
         self,
@@ -61,6 +63,16 @@ class ApiTestCodeGenerationService:
                 "coverage; they must be reviewed and completed before merging."
             )
 
+        repository_policy = self.policy.load(request.repo_path)
+        review_reasons.extend(
+            self.policy.file_findings(
+                repository_policy,
+                [
+                    (file.relative_path, file.test_target, file.content)
+                    for file in output.files
+                ],
+            )
+        )
         target_paths = [file.relative_path for file in output.files]
         coverage_before = self.coverage.snapshot_files(request.repo_path, target_paths)
         generated_files = self.file_writer.write(request.repo_path, output)

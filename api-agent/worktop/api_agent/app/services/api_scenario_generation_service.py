@@ -6,6 +6,7 @@ from worktop.api_agent.app.schemas.execution_target import ExecutionTarget
 from worktop.api_agent.app.schemas.api_scenario_request import GenerateApiScenariosRequest
 from worktop.api_agent.app.schemas.api_scenario_result import ApiScenarioGenerationResult
 from worktop.api_agent.app.schemas.repo_profile import RepoProfile
+from worktop.api_agent.app.policy.repository_policy_service import RepositoryPolicyService
 from worktop.api_agent.app.services.scenario_value_service import ScenarioValueService
 from worktop.api_agent.app.services.traceability_service import TraceabilityService
 from worktop.api_agent.app.utils.logging_utils import log_step
@@ -20,6 +21,7 @@ class ApiScenarioGenerationService:
         self.agent = agent
         self.value_service = value_service or ScenarioValueService()
         self.traceability = TraceabilityService()
+        self.policy = RepositoryPolicyService()
 
     def generate(
         self,
@@ -37,8 +39,13 @@ class ApiScenarioGenerationService:
                 "Scenario plan is a deterministic scaffold, not story-derived "
                 "coverage; it must be reviewed before use."
             )
+        repository_policy = self.policy.load(request.repo_path)
+        review_reasons.extend(
+            self.policy.scenario_findings(repository_policy, scenarios)
+        )
         scenario_value = self.value_service.evaluate(scenarios, profile)
-        review_reasons.extend(self.value_service.review_reasons(scenario_value))
+        if not repository_policy.generation.allow_full_duplicates:
+            review_reasons.extend(self.value_service.review_reasons(scenario_value))
         traceability = self.traceability.trace_scenarios(request, scenarios)
         review_reasons.extend(self.traceability.review_reasons(traceability))
         warnings = [*profile.warnings, *output.warnings, *guard_warnings]

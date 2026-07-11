@@ -10,6 +10,7 @@ from worktop.api_agent.app.schemas.api_test_generation_request import (
     GenerateApiTestCodeRequest,
 )
 from worktop.api_agent.app.schemas.generated_file import GeneratedFile
+from worktop.api_agent.app.policy.repository_policy_service import RepositoryPolicyService
 from worktop.api_agent.app.services.review_report_service import ReviewReportService
 from worktop.api_agent.app.services.scenario_value_service import ScenarioValueService
 from worktop.api_agent.app.services.traceability_service import TraceabilityService
@@ -289,3 +290,66 @@ class TestApiReviewReport:
             "## Remaining Risks",
         ):
             assert heading in report.markdown
+
+
+class TestRepositoryPolicy:
+    def test_defaults_apply_when_no_policy_file_exists(self, tmp_path: Path) -> None:
+        service = RepositoryPolicyService()
+
+        policy = service.load(str(tmp_path))
+
+        assert policy.source == "defaults"
+        assert policy.generation.forbid_real_network_in_ci is True
+        assert policy.generation.allow_full_duplicates is False
+
+    def test_policy_file_loads_without_yaml_dependency(self, tmp_path: Path) -> None:
+        service = RepositoryPolicyService()
+        policy_dir = tmp_path / ".movr"
+        policy_dir.mkdir()
+        (policy_dir / "api-agent-policy.yaml").write_text(
+            "generation:\n"
+            "  forbid_real_network_in_ci: true\n"
+            "  require_negative_scenarios: true\n"
+            "  allowed_test_frameworks: [restassured, mockmvc]\n"
+            "  max_files_per_generation: 2\n",
+            encoding="utf-8",
+        )
+
+        policy = service.load(str(tmp_path))
+
+        assert policy.source == ".movr/api-agent-policy.yaml"
+        assert policy.generation.require_negative_scenarios is True
+        assert policy.generation.allowed_test_frameworks == ["restassured", "mockmvc"]
+        assert policy.generation.max_files_per_generation == 2
+
+    def test_file_findings_flag_real_network_and_framework_violations(self) -> None:
+        service = RepositoryPolicyService()
+        policy = service.load("/nonexistent")
+        policy.generation.allowed_test_frameworks = ["restassured"]
+
+        findings = service.file_findings(
+            policy,
+            [
+                (
+                    "src/test/BadTest.java",
+                    "ci",
+                    "client.get(\"https://payments.example.com/charge\")",
+                ),
+                ("src/test/GoodTest.java", "ci", "import io.restassured.RestAssured;"),
+            ],
+        )
+
+        assert any("real network calls" in f for f in findings)
+        assert any("restricts test frameworks" in f and "BadTest" in f for f in findings)
+        assert not any("GoodTest" in f and "network" in f for f in findings)
+
+    def test_scenario_findings_require_negative_scenarios(self) -> None:
+        service = RepositoryPolicyService()
+        policy = service.load("/nonexistent")
+        policy.generation.require_negative_scenarios = True
+
+        findings = service.scenario_findings(
+            policy, [_scenario("API_TC_001", "positive only")]
+        )
+
+        assert findings == ["Policy requires at least one negative scenario; the plan has none."]
