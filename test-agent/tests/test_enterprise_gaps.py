@@ -12,7 +12,13 @@ from app.adapters.adapter_registry import (
 from app.adapters.playwright_adapter import PlaywrightAdapter
 from app.adapters.technology_adapter import TechnologyAdapter
 from app.agents.base_agent import BaseAgent
+from app.benchmark.benchmark_runner import BenchmarkRunner
 from app.coverage.coverage_preservation_service import CoveragePreservationService
+from app.schemas.benchmark import (
+    BenchmarkExpectation,
+    BenchmarkReport,
+    BenchmarkScenario,
+)
 from app.governance.generation_budget import (
     BudgetedLLMClient,
     BudgetExceededError,
@@ -1007,3 +1013,120 @@ class TestTechnologyAdapters:
 
         adapter.rollback(str(tmp_path), result)
         assert not (tmp_path / "e2e" / "employee.spec.ts").exists()
+
+
+class TestRegressionBenchmark:
+    def _result(
+        self,
+        job_id: str,
+        *,
+        action: str = "append_new_test",
+        files: list[str] | None = None,
+        diff: str = "",
+        validation_passed: bool = True,
+        repair_attempted: bool = False,
+    ) -> GenerationResult:
+        return GenerationResult(
+            job_id=job_id,
+            files_changed=files if files is not None else ["e2e/employee.spec.ts"],
+            diff=diff,
+            decision_trace=[DecisionTrace(decision=action)],
+            validation=ValidationResult(
+                passed=validation_passed,
+                repair_attempted=repair_attempted,
+            ),
+        )
+
+    def test_golden_scenarios_file_loads(self) -> None:
+        runner = BenchmarkRunner()
+        scenarios = runner.load_scenarios(
+            Path(__file__).parent.parent / "benchmarks" / "golden_scenarios.json"
+        )
+
+        assert [scenario.kind for scenario in scenarios] == [
+            "append",
+            "extend",
+            "create_spec",
+            "patch_repair",
+        ]
+        assert scenarios[0].expected.action == "append_new_test"
+
+    def test_report_scores_accuracy_reuse_and_latency(self) -> None:
+        runner = BenchmarkRunner()
+        scenarios = [
+            BenchmarkScenario(
+                name="append-ok",
+                kind="append",
+                expected=BenchmarkExpectation(
+                    action="append_new_test",
+                    target_spec="e2e/employee.spec.ts",
+                    reuse_signals=["EmployeePage"],
+                ),
+            ),
+            BenchmarkScenario(
+                name="extend-wrong-action",
+                kind="extend",
+                expected=BenchmarkExpectation(action="extend_existing_test"),
+            ),
+        ]
+
+        def generate(request: GenerationRequest) -> GenerationResult:
+            if "append-ok" in request.job_id:
+                return self._result(
+                    request.job_id, diff="const employeePage = new EmployeePage(page);"
+                )
+            return self._result(request.job_id, action="append_new_test")
+
+        report = runner.run(scenarios, generate)
+
+        assert report.metrics["append_accuracy"] == 1.0
+        assert report.metrics["extend_accuracy"] == 0.0
+        assert report.metrics["decision_accuracy"] == 0.5
+        assert report.metrics["reuse_rate"] == 1.0
+        assert report.metrics["patch_success_rate"] == 1.0
+        assert report.metrics["validation_pass_rate"] == 1.0
+        assert report.metrics["scenario_pass_rate"] == 0.5
+        assert report.metrics["avg_latency_ms"] >= 0.0
+        wrong = next(o for o in report.outcomes if o.scenario == "extend-wrong-action")
+        assert wrong.passed is False
+        assert any("expected action extend_existing_test" in f for f in wrong.failures)
+
+    def test_generation_errors_are_recorded_not_raised(self) -> None:
+        runner = BenchmarkRunner()
+        scenarios = [
+            BenchmarkScenario(name="boom", kind="append", expected=BenchmarkExpectation())
+        ]
+
+        def generate(request: GenerationRequest) -> GenerationResult:
+            raise RuntimeError("model unavailable")
+
+        report = runner.run(scenarios, generate)
+
+        [outcome] = report.outcomes
+        assert outcome.passed is False
+        assert "RuntimeError" in outcome.error
+        assert report.metrics["scenario_pass_rate"] == 0.0
+
+    def test_regression_detection_between_reports(self) -> None:
+        runner = BenchmarkRunner()
+        baseline = BenchmarkReport(
+            metrics={
+                "append_accuracy": 1.0,
+                "reuse_rate": 0.9,
+                "avg_latency_ms": 100.0,
+            }
+        )
+        current = BenchmarkReport(
+            metrics={
+                "append_accuracy": 0.8,
+                "reuse_rate": 0.95,
+                "avg_latency_ms": 250.0,
+            }
+        )
+
+        regressions = {r.metric: r for r in runner.detect_regressions(baseline, current)}
+
+        assert "append_accuracy" in regressions
+        assert regressions["append_accuracy"].delta == -0.2
+        assert "avg_latency_ms" in regressions
+        assert "reuse_rate" not in regressions
