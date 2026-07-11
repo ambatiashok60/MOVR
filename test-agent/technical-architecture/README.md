@@ -22,3 +22,11 @@ The cross-feature worker/SSE roadmap, including final end-to-end documentation, 
 [`../../ASYNC_EXECUTION_IMPLEMENTATION_PLAN.md`](../../ASYNC_EXECUTION_IMPLEMENTATION_PLAN.md).
 
 The top-level `TECHNICAL_ARCHITECTURE.md` is retained as a stable entry point.
+
+## Dependency graphs (typed node/edge views)
+
+Three primary graphs over one typed model — see
+[`dependency-graphs/`](dependency-graphs/README.md):
+1. [Backend Code Graph](dependency-graphs/01-backend-code-graph.md)
+2. [Cross-Layer Contract Propagation Graph](dependency-graphs/02-cross-layer-contract-graph.md)
+3. [Frontend Code Graph](dependency-graphs/03-frontend-code-graph.md)

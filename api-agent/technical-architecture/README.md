@@ -17,5 +17,12 @@
 15. [Task manager, frontend and ORM portability](15-task-frontend-persistence-portability.md)
 16. [Integration: persistence, ORM, and cross-service dependency graph](16-integration-persistence-and-dependency-graph.md)
 
+## Dependency graphs (typed node/edge views)
+
+Three primary graphs over one typed model — see [`dependency-graphs/`](dependency-graphs/README.md):
+1. [Backend Code Graph](dependency-graphs/01-backend-code-graph.md)
+2. [Cross-Layer Contract Propagation Graph](dependency-graphs/02-cross-layer-contract-graph.md)
+3. [Frontend Code Graph](dependency-graphs/03-frontend-code-graph.md)
+
 The shared worker/SSE roadmap and its final documentation phase are in
 [`../../ASYNC_EXECUTION_IMPLEMENTATION_PLAN.md`](../../ASYNC_EXECUTION_IMPLEMENTATION_PLAN.md).
