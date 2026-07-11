@@ -4,7 +4,19 @@ from pathlib import Path
 
 import pytest
 
+from worktop.api_agent.app.benchmark.benchmark_runner import BenchmarkRunner
 from worktop.api_agent.app.coverage.api_coverage_service import ApiCoverageService
+from worktop.api_agent.app.schemas.api_scenario_result import (
+    ApiScenarioGenerationResult,
+)
+from worktop.api_agent.app.schemas.api_test_generation_result import (
+    ApiTestGenerationResult,
+)
+from worktop.api_agent.app.schemas.benchmark import (
+    BenchmarkCase,
+    BenchmarkExpectation,
+    BenchmarkReport,
+)
 from worktop.api_agent.app.governance.generation_budget import (
     BudgetedLLMClient,
     BudgetExceededError,
@@ -466,3 +478,97 @@ class TestGenerationBudget:
             budget.charge_tool_call()
 
         assert "elapsed" in str(excinfo.value)
+
+
+class TestRegressionBenchmark:
+    def test_golden_cases_file_loads(self) -> None:
+        runner = BenchmarkRunner()
+        cases = runner.load_cases(
+            Path(__file__).parent.parent / "benchmarks" / "golden_cases.json"
+        )
+
+        assert [case.kind for case in cases] == ["scenario_plan", "code_generation"]
+        assert cases[0].expected.min_scenarios == 4
+
+    def test_report_scores_both_workflows(self) -> None:
+        runner = BenchmarkRunner()
+        cases = [
+            BenchmarkCase(
+                name="plan-ok",
+                kind="scenario_plan",
+                expected=BenchmarkExpectation(
+                    min_scenarios=2, expected_scenario_types=["positive", "negative"]
+                ),
+            ),
+            BenchmarkCase(
+                name="code-missing-files",
+                kind="code_generation",
+                expected=BenchmarkExpectation(expect_generated_files=True),
+            ),
+        ]
+
+        def generate_scenarios(request):
+            return ApiScenarioGenerationResult(
+                task_id="t",
+                user_story_hierarchy_id=0,
+                scenarios=[
+                    _scenario("API_TC_001", "positive case"),
+                    ApiScenario(
+                        api_scenario_id="API_TC_002",
+                        scenario_name="negative case",
+                        scenario_type="negative",
+                        reason="test",
+                        scenario_steps=["call"],
+                        assertions=["400"],
+                    ),
+                ],
+            )
+
+        def generate_code(request):
+            return ApiTestGenerationResult(
+                task_id="t",
+                user_story_hierarchy_id=0,
+                api_scenario_id=request.api_scenario_id,
+                generated_files=[],
+                summary="nothing",
+            )
+
+        report = runner.run(
+            cases,
+            generate_scenarios=generate_scenarios,
+            generate_code=generate_code,
+        )
+
+        assert report.metrics["scenario_plan_accuracy"] == 1.0
+        assert report.metrics["code_generation_accuracy"] == 0.0
+        assert report.metrics["case_pass_rate"] == 0.5
+        failing = next(o for o in report.outcomes if o.case == "code-missing-files")
+        assert "expected generated files" in failing.failures[0]
+
+    def test_errors_are_recorded_not_raised(self) -> None:
+        runner = BenchmarkRunner()
+
+        def boom(request):
+            raise RuntimeError("model unavailable")
+
+        report = runner.run(
+            [BenchmarkCase(name="boom", kind="scenario_plan")],
+            generate_scenarios=boom,
+        )
+
+        [outcome] = report.outcomes
+        assert outcome.passed is False
+        assert "RuntimeError" in outcome.error
+
+    def test_regression_detection_between_reports(self) -> None:
+        runner = BenchmarkRunner()
+        baseline = BenchmarkReport(
+            metrics={"scenario_plan_accuracy": 1.0, "avg_latency_ms": 90.0}
+        )
+        current = BenchmarkReport(
+            metrics={"scenario_plan_accuracy": 0.5, "avg_latency_ms": 200.0}
+        )
+
+        regressions = {r.metric for r in runner.detect_regressions(baseline, current)}
+
+        assert regressions == {"scenario_plan_accuracy", "avg_latency_ms"}

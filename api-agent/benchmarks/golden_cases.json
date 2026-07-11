@@ -1,0 +1,38 @@
+{
+  "description": "Golden benchmark cases for the API test generation engine. Every prompt, strategy, or policy change must run against these before merging so scenario quality, code generation success, validation, and latency regressions are caught by numbers.",
+  "cases": [
+    {
+      "name": "soh-records-scenario-plan",
+      "kind": "scenario_plan",
+      "story_title": "SOH Table - View, Filter, and Manage Statement of Health Records",
+      "acceptance_criteria": [
+        "Records are returned for valid filters",
+        "Empty response when no records exist",
+        "Invalid employeeId returns 400",
+        "Authentication is required"
+      ],
+      "expected": {
+        "min_scenarios": 4,
+        "expected_scenario_types": ["positive", "negative", "auth"]
+      }
+    },
+    {
+      "name": "soh-records-code-generation",
+      "kind": "code_generation",
+      "scenario_name": "Verify successful retrieval of SOH records with valid filters",
+      "scenario_steps": [
+        "Authenticate with a bearer token",
+        "Call GET /api/soh-records with valid filters"
+      ],
+      "assertions": [
+        "Status code 200",
+        "Response schema matches SOHRecordsResponse",
+        "Non-empty records returned"
+      ],
+      "expected": {
+        "expect_generated_files": true,
+        "validation_should_pass": true
+      }
+    }
+  ]
+}
