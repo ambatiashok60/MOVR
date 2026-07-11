@@ -55,7 +55,7 @@ The current implementation includes:
 - Playwright validation for test discovery and duplicate titles within spec
   files.
 - Validation placeholders for syntax checks and repo command validation.
-- Shared logging metadata helper at `app/utils/logging_utils.py`.
+- Shared logging metadata helper at `worktop/test_agent/app/utils/logging_utils.py`.
 - Repository support classification for beta-fit, warning-fit, and unsupported
   repositories.
 
@@ -140,7 +140,7 @@ runtime, or validation support:
 - Selenium, WebDriver, Java, Python, C#, Ruby, or non-TypeScript test repos.
 - Playwright repos using a custom internal DSL instead of recognizable
   Playwright APIs.
-- Complex Nx, Turborepo, Bazel, or polyrepo setups with ambiguous app/test
+- Complex Nx, Turborepo, Bazel, or polyrepo setups with ambiguous worktop/test_agent/app/test
   ownership.
 - Repositories with many Playwright configs and no clear target app.
 - Microfrontend repositories where routes and screens are assembled dynamically.
@@ -328,7 +328,7 @@ Final Response
 ```
 
 The current scaffold wires these stages through
-`app/services/generation_orchestrator.py`. A few stages remain deterministic
+`worktop/test_agent/app/services/generation_orchestrator.py`. A few stages remain deterministic
 placeholders so the system shape is stable before connecting the remaining parser
 implementations, but the decision stages themselves are now fully wired (see
 [Decision Intelligence Hardening](#decision-intelligence-hardening)).
@@ -622,30 +622,30 @@ Trace quality               structural only             shallow traces flagged
 ### Where these live
 
 ```text
-app/schemas/test_action_decision.py     Literal action + TestActions constants
-app/schemas/spec_placement.py           bounded confidence + labels
-app/schemas/candidate_ranking.py        ranking schema (new)
-app/schemas/behavioral_test_unit.py     ExistingTestContext + AnchorFlowContext
-app/schemas/flow_merge.py               confidence + DecisionTrace
-app/schemas/ownership_resolution.py     create_new + DecisionTrace
-app/schemas/generation_result.py        needs_review + review_reasons
-app/prompts/candidate_ranking_prompt.py ranking prompt (new)
-app/prompts/flow_merge_prompt.py        grounded in existing test source
-app/prompts/code_generation_prompt.py   anchor/flow/ownership/locator reuse rules
-app/prompts/prompt_sections.py          best-practices scaffold, per-model
+worktop/test_agent/app/schemas/test_action_decision.py     Literal action + TestActions constants
+worktop/test_agent/app/schemas/spec_placement.py           bounded confidence + labels
+worktop/test_agent/app/schemas/candidate_ranking.py        ranking schema (new)
+worktop/test_agent/app/schemas/behavioral_test_unit.py     ExistingTestContext + AnchorFlowContext
+worktop/test_agent/app/schemas/flow_merge.py               confidence + DecisionTrace
+worktop/test_agent/app/schemas/ownership_resolution.py     create_new + DecisionTrace
+worktop/test_agent/app/schemas/generation_result.py        needs_review + review_reasons
+worktop/test_agent/app/prompts/candidate_ranking_prompt.py ranking prompt (new)
+worktop/test_agent/app/prompts/flow_merge_prompt.py        grounded in existing test source
+worktop/test_agent/app/prompts/code_generation_prompt.py   anchor/flow/ownership/locator reuse rules
+worktop/test_agent/app/prompts/prompt_sections.py          best-practices scaffold, per-model
                                         examples, context curation helpers
-app/prompts/ownership_resolution_prompt.py  needed-locators grounding
-app/agents/candidate_test_ranking_agent.py  real LLM ranking + fallback
-app/services/generation_orchestrator.py reconcile, gates, optional stages,
+worktop/test_agent/app/prompts/ownership_resolution_prompt.py  needed-locators grounding
+worktop/test_agent/app/agents/candidate_test_ranking_agent.py  real LLM ranking + fallback
+worktop/test_agent/app/services/generation_orchestrator.py reconcile, gates, optional stages,
                                         anchor flow, bootstrap wiring,
                                         patch-plan guards (extension, append
                                         reuse, reference integrity, ownership
                                         emission, created-spec structure,
                                         bootstrap scaffold)
-app/services/repo_strategy_service.py   bootstrap classification
-app/services/bootstrap_scaffold_service.py  deterministic framework scaffold (new)
-app/schemas/repo_profile.py             requires_bootstrap flag
-app/config.py                           min_*_confidence thresholds
+worktop/test_agent/app/services/repo_strategy_service.py   bootstrap classification
+worktop/test_agent/app/services/bootstrap_scaffold_service.py  deterministic framework scaffold (new)
+worktop/test_agent/app/schemas/repo_profile.py             requires_bootstrap flag
+worktop/test_agent/app/config.py                           min_*_confidence thresholds
 ```
 
 ## Architecture
@@ -655,7 +655,7 @@ app/config.py                           min_*_confidence thresholds
 Located in:
 
 ```text
-app/api/routes/
+worktop/test_agent/app/api/routes/
 ```
 
 Responsibilities:
@@ -673,7 +673,7 @@ orchestrator.
 Located in:
 
 ```text
-app/services/generation_orchestrator.py
+worktop/test_agent/app/services/generation_orchestrator.py
 ```
 
 Responsibilities:
@@ -692,7 +692,7 @@ belongs in agents, services, tools, patching, or validation modules.
 Located in:
 
 ```text
-app/services/
+worktop/test_agent/app/services/
 ```
 
 Responsibilities:
@@ -717,7 +717,7 @@ Services are the bridge between deterministic tools and agent decisions.
 Located in:
 
 ```text
-app/agents/
+worktop/test_agent/app/agents/
 ```
 
 Responsibilities:
@@ -736,7 +736,7 @@ Responsibilities:
 Every agent inherits from:
 
 ```text
-app/agents/base_agent.py
+worktop/test_agent/app/agents/base_agent.py
 ```
 
 The base class centralizes common logging behavior and the structured LLM call
@@ -748,7 +748,7 @@ provider SDKs directly.
 Located in:
 
 ```text
-app/tools/
+worktop/test_agent/app/tools/
 ```
 
 Responsibilities:
@@ -767,7 +767,7 @@ Tools are deterministic. They do not make semantic decisions.
 Located in:
 
 ```text
-app/inventory/
+worktop/test_agent/app/inventory/
 ```
 
 Responsibilities:
@@ -786,7 +786,7 @@ inventory is deterministic and based on Git, ASTs, file paths, and file hashes.
 Located in:
 
 ```text
-app/patching/
+worktop/test_agent/app/patching/
 ```
 
 Responsibilities:
@@ -804,7 +804,7 @@ structured patch intent; they do not overwrite arbitrary files.
 Located in:
 
 ```text
-app/validation/
+worktop/test_agent/app/validation/
 ```
 
 Responsibilities:
@@ -854,11 +854,11 @@ decision = self.llm.complete_structured(
 Current implementation files:
 
 ```text
-app/llm/llm_client.py
-app/llm/default_llm_client.py
-app/llm/llm_client_factory.py
-app/runtime/generation_runtime.py
-app/prompts/
+worktop/test_agent/app/llm/llm_client.py
+worktop/test_agent/app/llm/default_llm_client.py
+worktop/test_agent/app/llm/llm_client_factory.py
+worktop/test_agent/app/runtime/generation_runtime.py
+worktop/test_agent/app/prompts/
 ```
 
 `GenerationRuntime` is created per request and carries the job, tenant,
@@ -916,7 +916,7 @@ It does not create a new logger.
 Shared logging metadata is normalized by:
 
 ```text
-app/utils/logging_utils.py
+worktop/test_agent/app/utils/logging_utils.py
 ```
 
 Supported metadata keys:
@@ -985,7 +985,7 @@ Every agent decision should follow this structure:
 This is represented by:
 
 ```text
-app/schemas/decision_trace.py
+worktop/test_agent/app/schemas/decision_trace.py
 ```
 
 ## Write Rules
@@ -1074,7 +1074,7 @@ pip install -e .
 Run the service:
 
 ```bash
-uvicorn app.main:app --reload
+uvicorn worktop.test_agent.app.main:app --reload
 ```
 
 Run a sample request:
@@ -1101,19 +1101,193 @@ python3 -m compileall -q test-agent
 ## File Map
 
 ```text
-app/main.py
-app/config.py
-app/api/routes/
-app/schemas/
-app/services/
-app/agents/
-app/tools/
-app/inventory/
-app/patching/
-app/validation/
-app/utils/
+worktop/test_agent/app/main.py
+worktop/test_agent/app/config.py
+worktop/test_agent/app/api/routes/
+worktop/test_agent/app/schemas/
+worktop/test_agent/app/services/
+worktop/test_agent/app/agents/
+worktop/test_agent/app/tools/
+worktop/test_agent/app/inventory/
+worktop/test_agent/app/patching/
+worktop/test_agent/app/validation/
+worktop/test_agent/app/utils/
 ```
 
 The architecture is intentionally modular so each workflow stage can be
 implemented and tested independently while preserving one consistent generation
 contract.
+
+## Enterprise Intelligence (Phase 2 — Gaps 25–36)
+
+Phase 1 made the generator technically correct, structurally safe, and
+explainable. Phase 2 layers the platform-value capabilities that make it
+enterprise-ready: trustworthy, measurable, governable, and extensible. None of
+these change *how* code is generated; they change what the platform can prove
+about every generation.
+
+### Coverage Preservation (Gap 25)
+
+The engine never assumes an extension preserved existing coverage — it proves
+it. A behavioral coverage graph (assertions, navigations, API touchpoints,
+interactions, data inputs per test) is built before generation from the
+behavioral inventory and again after patches land by re-parsing every patched
+spec. The diff is classified as preserved / added / removed / modified; removed
+or weakened behavior becomes a review reason and the full
+`CoveragePreservationReport` ships on the result.
+
+### Test Value Analysis (Gap 26)
+
+A generated test that compiles is not necessarily valuable. Every newly
+generated test is compared against the closest existing test by
+outcome-signal overlap and classified as `NEW_COVERAGE`,
+`MEANINGFUL_VARIATION`, `PARTIAL_DUPLICATE`, `FULL_DUPLICATE`, or `LOW_VALUE`.
+A `FULL_DUPLICATE` is never accepted silently — it requires approval (unless
+the repository policy explicitly tolerates duplicates), and assertion-free
+tests are flagged as low value.
+
+### Requirement Traceability (Gap 27)
+
+Every story step and expected assertion is mapped to the code that implements
+it — a generated patch or a reused existing flow — with evidence and a match
+score. Requirements that trace to nothing are reported `missing` and become
+review reasons, so "where is requirement 5 implemented?" is answerable
+directly from the `TraceabilityMatrix` on the result.
+
+### Human Review Intelligence (Gap 28)
+
+Instead of a bare diff, every run produces a `ReviewReport`: summary, files
+changed with reasons, flows reused and added, why the action and placement
+were chosen, methods created vs reused, locators reused, assertions added,
+validation outcome, and remaining risks — with a rendered markdown version.
+Goal: a five-minute review instead of a thirty-minute diff archaeology.
+
+### Repository Policy Engine (Gap 29)
+
+Different repositories have different rules. A policy file committed in the
+target repository (`.movr/test-agent-policy.yaml`, YAML or JSON — parsed even
+without a YAML dependency) declares them:
+
+```yaml
+generation:
+  allow_before_each_updates: false
+  assertion_location: spec        # spec | page_object | any
+  locator_owner: page_object      # page_object | spec | any
+  require_describe: true
+  rollback_failed_patch: true
+  allow_full_duplicates: false
+```
+
+Policy checks join the patch-plan guard, so violations route through the
+repair loop like any other structural failure; exhausted failures roll the
+repository back when the policy demands a clean tree.
+
+### Deterministic Generation (Gap 30)
+
+Every run freezes its inputs into a `GenerationManifest`: repository snapshot
+digest and head, content-hashed prompt versions (a prompt edit changes the
+recorded version automatically), model provider, generation settings, policy
+snapshot, stage decisions with confidence, and patch digests — plus an
+overall fingerprint so identical inputs are provably identical and divergent
+outputs can be explained input-by-input.
+
+### Regression Benchmark Suite (Gap 31)
+
+Golden scenarios in `benchmarks/golden_scenarios.json` (append, extend,
+create-spec, patch repair) run through the generator and are scored:
+append/extend/create accuracy, decision accuracy, reuse rate, patch success,
+repair success, validation pass rate, latency. `BenchmarkRunner.
+detect_regressions` compares reports so a prompt change that improves one
+behavior and silently regresses another is caught by numbers.
+
+### Cost & Latency Governance (Gap 32)
+
+Each run gets a `GenerationBudget` with hard ceilings (configurable via
+settings): max LLM calls, tool calls, repository reads, prompt volume, and
+wall-clock time. All agents run through a budget-charging LLM client wrapper;
+exploration loops charge repository reads; repair loops charge attempts.
+Exceeding any ceiling raises an explicit escalation instead of continuing
+forever, and the usage report ships on every successful result.
+
+### Workspace Isolation (Gap 33)
+
+Every job acquires a per-repository lock and an isolated workspace with a
+patch journal, rollback journal, and pre-patch snapshots of every file it
+touches. Two jobs on the same repository can never interleave writes or
+validate each other's files; stale locks from dead jobs are reclaimed after a
+timeout.
+
+### Idempotency (Gap 34)
+
+Generations are fingerprinted from the repository version (head + file
+hashes) plus the story name and steps. A repeated Generate against an
+unchanged repository returns "equivalent patch already generated" with a
+pointer to the original job instead of appending an identical test again.
+
+### Repository Security & Data Governance (Gap 35)
+
+Files are classified safe / internal / sensitive / restricted before anything
+reaches an LLM. Restricted material (env files, key material, credential
+stores) is never released in any form; everything else is scrubbed of secrets
+(passwords, API keys, cloud/GitHub/Slack tokens, JWTs, private key blocks).
+The model-directed exploration path enforces this on reads and search
+snippets, and an audit records files sent, files blocked, prompt volume, and
+redaction counts.
+
+### Technology-Agnostic Architecture (Gap 36)
+
+Core intelligence (flow reasoning, decisions, patch loops, validation/repair,
+coverage, reporting) is separated from the technology layer behind a
+`TechnologyAdapter` interface: `analyze_repository`, `classify_test_files`,
+`build_inventory`, `build_flow_inventory`, `apply_patch`, `rollback`,
+`validate`. `PlaywrightAdapter` implements it with the existing services; an
+`AdapterRegistry` resolves the configured technology. Supporting REST
+Assured, GraphQL, or gRPC later means writing an adapter — not duplicating
+the orchestration.
+
+### Logging Standardization & Workflow Observability (Gap 37)
+
+Logging follows one standard across the whole framework:
+
+```python
+from worktop.test_agent.utils.logging import get_logger
+
+logger = get_logger(__name__)
+```
+
+This is the only supported pattern — no `print()`, no custom logger
+initialization, no ad-hoc logging utilities (all enforced by
+`tests/test_logging_standard.py`, which scans the package source). Levels are
+used consistently: DEBUG for internals (prompt construction, model response
+parsing, tool output), INFO for workflow progress and decisions, WARNING for
+recoverable issues (structured-response repair, fallbacks), ERROR for stage
+failures, and `logger.exception` for unexpected exceptions. Prompts and raw
+LLM responses never appear above DEBUG.
+
+Every orchestrator stage logs through a shared `stage_log` scope that renders
+the standard workflow format:
+
+```
+============================================================
+Repository Analysis
+============================================================
+
+Starting repository analysis...
+job_id: job-42
+
+Summary
+-------
+support_status: supported
+
+Repository Analysis completed in 2.31 seconds.
+```
+
+Failures render as `<Stage> FAILED after N seconds: <error>`; optional and
+advisory stages log that generation continues without them. The whole run
+opens with a generation banner and closes with a Generation Summary (files
+changed, review status, validation outcome, total duration).
+
+All imports are rooted at `worktop.test_agent` (matching the wider worktop
+platform layout, e.g. `worktop.core_services.app...`); the service package
+lives at `worktop/test_agent/app` and the shared logging utility at
+`worktop/test_agent/utils/logging.py`.

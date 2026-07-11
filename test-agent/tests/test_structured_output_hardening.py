@@ -1,22 +1,22 @@
 from __future__ import annotations
 
-from app.llm.default_llm_client import DefaultLLMClientAdapter
-from app.logging_config import LOG_FORMAT
-from app.prompts.functional_intent_prompt import (
+from worktop.test_agent.app.llm.default_llm_client import DefaultLLMClientAdapter
+from worktop.test_agent.app.logging_config import LOG_FORMAT
+from worktop.test_agent.app.prompts.functional_intent_prompt import (
     build_functional_intent_prompt,
 )
-from app.prompts.code_generation_prompt import build_code_generation_prompt
-from app.schemas.behavioral_test_unit import BehavioralTestUnit, ExistingTestContext
-from app.schemas.code_patch import AppliedPatch, CodePatch, PatchSet, PatchWriteResult
-from app.schemas.functional_intent import FunctionalIntent
-from app.schemas.generation_request import GenerationRequest
-from app.schemas.playwright_ui_context import PlaywrightUiContext
-from app.schemas.spec_placement import SpecPlacementDecision
-from app.schemas.test_action_decision import TestActionDecision as PlaywrightTestActionDecision
-from app.schemas.validation_result import ValidationCheck, ValidationResult
-from app.services.behavioral_inventory_service import BehavioralInventoryService
-from app.services.generation_orchestrator import GenerationOrchestrator
-from app.tools.playwright_parser_tool import PlaywrightParserTool
+from worktop.test_agent.app.prompts.code_generation_prompt import build_code_generation_prompt
+from worktop.test_agent.app.schemas.behavioral_test_unit import BehavioralTestUnit, ExistingTestContext
+from worktop.test_agent.app.schemas.code_patch import AppliedPatch, CodePatch, PatchSet, PatchWriteResult
+from worktop.test_agent.app.schemas.functional_intent import FunctionalIntent
+from worktop.test_agent.app.schemas.generation_request import GenerationRequest
+from worktop.test_agent.app.schemas.playwright_ui_context import PlaywrightUiContext
+from worktop.test_agent.app.schemas.spec_placement import SpecPlacementDecision
+from worktop.test_agent.app.schemas.test_action_decision import TestActionDecision as PlaywrightTestActionDecision
+from worktop.test_agent.app.schemas.validation_result import ValidationCheck, ValidationResult
+from worktop.test_agent.app.services.behavioral_inventory_service import BehavioralInventoryService
+from worktop.test_agent.app.services.generation_orchestrator import GenerationOrchestrator
+from worktop.test_agent.app.tools.playwright_parser_tool import PlaywrightParserTool
 
 
 class RepairingClient(DefaultLLMClientAdapter):
@@ -152,7 +152,7 @@ def _make_unit(title: str, line: int) -> BehavioralTestUnit:
 
 
 def test_candidate_ranking_passes_through_without_intent_or_llm() -> None:
-    from app.agents.candidate_test_ranking_agent import CandidateTestRankingAgent
+    from worktop.test_agent.app.agents.candidate_test_ranking_agent import CandidateTestRankingAgent
 
     agent = CandidateTestRankingAgent()
     candidates = [_make_unit("a", 1), _make_unit("b", 10)]
@@ -160,8 +160,8 @@ def test_candidate_ranking_passes_through_without_intent_or_llm() -> None:
 
 
 def test_candidate_ranking_reorders_from_model_ranking() -> None:
-    from app.agents.candidate_test_ranking_agent import CandidateTestRankingAgent
-    from app.schemas.candidate_ranking import CandidateRanking, RankedCandidateRef
+    from worktop.test_agent.app.agents.candidate_test_ranking_agent import CandidateTestRankingAgent
+    from worktop.test_agent.app.schemas.candidate_ranking import CandidateRanking, RankedCandidateRef
 
     agent = CandidateTestRankingAgent()
     first = _make_unit("first", 1)
@@ -177,8 +177,8 @@ def test_candidate_ranking_reorders_from_model_ranking() -> None:
 
 
 def test_candidate_ranking_keeps_unreferenced_candidates_at_end() -> None:
-    from app.agents.candidate_test_ranking_agent import CandidateTestRankingAgent
-    from app.schemas.candidate_ranking import CandidateRanking, RankedCandidateRef
+    from worktop.test_agent.app.agents.candidate_test_ranking_agent import CandidateTestRankingAgent
+    from worktop.test_agent.app.schemas.candidate_ranking import CandidateRanking, RankedCandidateRef
 
     agent = CandidateTestRankingAgent()
     a = _make_unit("a", 1)
@@ -192,7 +192,7 @@ def test_candidate_ranking_keeps_unreferenced_candidates_at_end() -> None:
 
 
 def test_candidate_ranking_uses_llm_ranking_end_to_end() -> None:
-    from app.agents.candidate_test_ranking_agent import CandidateTestRankingAgent
+    from worktop.test_agent.app.agents.candidate_test_ranking_agent import CandidateTestRankingAgent
 
     client = RepairingClient(
         [
@@ -211,8 +211,8 @@ def test_candidate_ranking_uses_llm_ranking_end_to_end() -> None:
 
 
 def test_ownership_prompt_includes_reuse_vs_create_standards() -> None:
-    from app.prompts.ownership_resolution_prompt import build_ownership_resolution_prompt
-    from app.schemas.repository_inventory import RepositoryInventory
+    from worktop.test_agent.app.prompts.ownership_resolution_prompt import build_ownership_resolution_prompt
+    from worktop.test_agent.app.schemas.repository_inventory import RepositoryInventory
 
     prompt = build_ownership_resolution_prompt(
         RepositoryInventory(repo_path="/tmp/repo", repo_head="abc")
@@ -223,8 +223,8 @@ def test_ownership_prompt_includes_reuse_vs_create_standards() -> None:
 
 
 def test_ownership_fallback_reuses_existing_owner_with_trace() -> None:
-    from app.agents.ownership_resolution_agent import OwnershipResolutionAgent
-    from app.schemas.repository_inventory import RepositoryInventory
+    from worktop.test_agent.app.agents.ownership_resolution_agent import OwnershipResolutionAgent
+    from worktop.test_agent.app.schemas.repository_inventory import RepositoryInventory
 
     agent = OwnershipResolutionAgent()
     inventory = RepositoryInventory(
@@ -240,7 +240,7 @@ def test_ownership_fallback_reuses_existing_owner_with_trace() -> None:
 
 
 def test_low_ownership_confidence_is_flagged_for_review() -> None:
-    from app.schemas.ownership_resolution import OwnershipResolution
+    from worktop.test_agent.app.schemas.ownership_resolution import OwnershipResolution
 
     orchestrator = GenerationOrchestrator()
     reasons: list[str] = []
@@ -312,7 +312,7 @@ def test_anchor_flow_context_none_when_no_sibling_in_target_spec() -> None:
 
 
 def test_code_generation_prompt_includes_anchor_flow_and_append_rules() -> None:
-    from app.schemas.behavioral_test_unit import AnchorFlowContext
+    from worktop.test_agent.app.schemas.behavioral_test_unit import AnchorFlowContext
 
     prompt = build_code_generation_prompt(
         placement=SpecPlacementDecision(target_spec_file="tests/plans.spec.ts", create_new=False),
@@ -331,7 +331,7 @@ def test_code_generation_prompt_includes_anchor_flow_and_append_rules() -> None:
 
 
 def test_append_reuse_check_fails_when_no_overlap() -> None:
-    from app.schemas.behavioral_test_unit import AnchorFlowContext
+    from worktop.test_agent.app.schemas.behavioral_test_unit import AnchorFlowContext
 
     orchestrator = GenerationOrchestrator()
     anchor = AnchorFlowContext(
@@ -355,7 +355,7 @@ def test_append_reuse_check_fails_when_no_overlap() -> None:
 
 
 def test_append_reuse_check_passes_when_anchor_page_object_reused() -> None:
-    from app.schemas.behavioral_test_unit import AnchorFlowContext
+    from worktop.test_agent.app.schemas.behavioral_test_unit import AnchorFlowContext
 
     orchestrator = GenerationOrchestrator()
     anchor = AnchorFlowContext(
@@ -378,7 +378,7 @@ def test_append_reuse_check_passes_when_anchor_page_object_reused() -> None:
 
 
 def test_append_reuse_check_noop_without_reusable_signals() -> None:
-    from app.schemas.behavioral_test_unit import AnchorFlowContext
+    from worktop.test_agent.app.schemas.behavioral_test_unit import AnchorFlowContext
 
     orchestrator = GenerationOrchestrator()
     anchor = AnchorFlowContext(
@@ -392,7 +392,7 @@ def test_append_reuse_check_noop_without_reusable_signals() -> None:
 
 
 def test_flow_merge_prompt_grounds_in_existing_test_source() -> None:
-    from app.prompts.flow_merge_prompt import build_flow_merge_prompt
+    from worktop.test_agent.app.prompts.flow_merge_prompt import build_flow_merge_prompt
 
     prompt = build_flow_merge_prompt(
         FunctionalIntent(capability="open plan design"),
@@ -409,7 +409,7 @@ def test_flow_merge_prompt_grounds_in_existing_test_source() -> None:
 
 
 def test_flow_merge_plan_has_confidence_and_trace() -> None:
-    from app.schemas.flow_merge import FlowMergePlan
+    from worktop.test_agent.app.schemas.flow_merge import FlowMergePlan
 
     plan = FlowMergePlan(preserved_steps=["await page.goto('/')"], confidence=0.4)
     assert plan.confidence == 0.4
@@ -417,7 +417,7 @@ def test_flow_merge_plan_has_confidence_and_trace() -> None:
 
 
 def test_low_flow_merge_confidence_flagged() -> None:
-    from app.schemas.flow_merge import FlowMergePlan
+    from worktop.test_agent.app.schemas.flow_merge import FlowMergePlan
 
     orchestrator = GenerationOrchestrator()
     reasons: list[str] = []
@@ -426,7 +426,7 @@ def test_low_flow_merge_confidence_flagged() -> None:
 
 
 def test_dropped_preserved_step_is_flagged() -> None:
-    from app.schemas.flow_merge import FlowMergePlan
+    from worktop.test_agent.app.schemas.flow_merge import FlowMergePlan
 
     orchestrator = GenerationOrchestrator()
     existing = ExistingTestContext(
@@ -452,7 +452,7 @@ def test_dropped_preserved_step_is_flagged() -> None:
 
 
 def test_preserved_step_not_in_source_is_not_enforced() -> None:
-    from app.schemas.flow_merge import FlowMergePlan
+    from worktop.test_agent.app.schemas.flow_merge import FlowMergePlan
 
     orchestrator = GenerationOrchestrator()
     existing = ExistingTestContext(
@@ -469,7 +469,7 @@ def test_preserved_step_not_in_source_is_not_enforced() -> None:
 
 
 def test_code_generation_prompt_includes_locator_decisions_and_rules() -> None:
-    from app.schemas.locator_decision import LocatorDecision
+    from worktop.test_agent.app.schemas.locator_decision import LocatorDecision
 
     prompt = build_code_generation_prompt(
         placement=SpecPlacementDecision(target_spec_file="tests/plans.spec.ts"),
@@ -518,9 +518,9 @@ def test_create_new_spec_uses_template_anchor_from_repository() -> None:
 
 
 def test_ownership_prompt_includes_needed_locators_section() -> None:
-    from app.prompts.ownership_resolution_prompt import build_ownership_resolution_prompt
-    from app.schemas.repository_inventory import RepositoryInventory
-    from app.schemas.source_intelligence import SourceEvidence, SourceIntelligence
+    from worktop.test_agent.app.prompts.ownership_resolution_prompt import build_ownership_resolution_prompt
+    from worktop.test_agent.app.schemas.repository_inventory import RepositoryInventory
+    from worktop.test_agent.app.schemas.source_intelligence import SourceEvidence, SourceIntelligence
 
     prompt = build_ownership_resolution_prompt(
         RepositoryInventory(repo_path="/tmp/repo", repo_head="abc"),
@@ -535,7 +535,7 @@ def test_ownership_prompt_includes_needed_locators_section() -> None:
 
 
 def test_ownership_emission_check_fails_without_promised_owner_patch() -> None:
-    from app.schemas.ownership_resolution import OwnershipResolution
+    from worktop.test_agent.app.schemas.ownership_resolution import OwnershipResolution
 
     orchestrator = GenerationOrchestrator()
     ownership = OwnershipResolution(
@@ -562,7 +562,7 @@ def test_ownership_emission_check_fails_without_promised_owner_patch() -> None:
 
 
 def test_ownership_emission_check_noop_for_reuse_or_spec_owner() -> None:
-    from app.schemas.ownership_resolution import OwnershipResolution
+    from worktop.test_agent.app.schemas.ownership_resolution import OwnershipResolution
 
     orchestrator = GenerationOrchestrator()
     reuse = OwnershipResolution(owner_path="pages/PlanPage.ts", owner_kind="page_object", create_new=False)
@@ -714,7 +714,7 @@ def _write_package_json(tmp_path, dependencies=None, scripts=None) -> None:
 
 
 def test_repo_strategy_classifies_greenfield_ui_repo_as_bootstrap(tmp_path) -> None:
-    from app.services.repo_strategy_service import RepoStrategyService
+    from worktop.test_agent.app.services.repo_strategy_service import RepoStrategyService
 
     _write_package_json(
         tmp_path,
@@ -732,7 +732,7 @@ def test_repo_strategy_classifies_greenfield_ui_repo_as_bootstrap(tmp_path) -> N
 
 
 def test_repo_strategy_still_blocks_cypress_repo_without_playwright(tmp_path) -> None:
-    from app.services.repo_strategy_service import RepoStrategyService
+    from worktop.test_agent.app.services.repo_strategy_service import RepoStrategyService
 
     _write_package_json(tmp_path, dependencies={"react": "^18.0.0", "cypress": "^13.0.0"})
 
@@ -743,7 +743,7 @@ def test_repo_strategy_still_blocks_cypress_repo_without_playwright(tmp_path) ->
 
 
 def test_repo_strategy_config_without_specs_is_warning_not_blocker(tmp_path) -> None:
-    from app.services.repo_strategy_service import RepoStrategyService
+    from worktop.test_agent.app.services.repo_strategy_service import RepoStrategyService
 
     _write_package_json(tmp_path, dependencies={"react": "^18.0.0"})
     (tmp_path / "playwright.config.ts").write_text(
@@ -759,8 +759,8 @@ def test_repo_strategy_config_without_specs_is_warning_not_blocker(tmp_path) -> 
 
 
 def test_bootstrap_scaffold_builds_config_package_and_fixtures(tmp_path) -> None:
-    from app.schemas.repo_profile import RepoProfile
-    from app.services.bootstrap_scaffold_service import BootstrapScaffoldService
+    from worktop.test_agent.app.schemas.repo_profile import RepoProfile
+    from worktop.test_agent.app.services.bootstrap_scaffold_service import BootstrapScaffoldService
 
     _write_package_json(
         tmp_path,
@@ -791,8 +791,8 @@ def test_bootstrap_scaffold_builds_config_package_and_fixtures(tmp_path) -> None
 
 
 def test_bootstrap_merge_prefers_deterministic_scaffold_on_collision(tmp_path) -> None:
-    from app.schemas.repo_profile import RepoProfile
-    from app.services.bootstrap_scaffold_service import BootstrapScaffoldService
+    from worktop.test_agent.app.schemas.repo_profile import RepoProfile
+    from worktop.test_agent.app.services.bootstrap_scaffold_service import BootstrapScaffoldService
 
     _write_package_json(tmp_path, dependencies={"react": "^18.0.0"})
     profile = RepoProfile(
@@ -824,7 +824,7 @@ def test_bootstrap_merge_prefers_deterministic_scaffold_on_collision(tmp_path) -
 
 
 def test_bootstrap_placement_normalized_to_e2e_convention() -> None:
-    from app.schemas.repo_profile import RepoProfile
+    from worktop.test_agent.app.schemas.repo_profile import RepoProfile
 
     orchestrator = GenerationOrchestrator()
     profile = RepoProfile(repo_path="/tmp/repo", requires_bootstrap=True)
@@ -879,8 +879,8 @@ def test_bootstrap_scaffold_guard_requires_config_and_dependency() -> None:
 
 
 def test_response_contract_has_real_ownership_example() -> None:
-    from app.prompts.prompt_sections import response_contract
-    from app.schemas.ownership_resolution import OwnershipResolution
+    from worktop.test_agent.app.prompts.prompt_sections import response_contract
+    from worktop.test_agent.app.schemas.ownership_resolution import OwnershipResolution
 
     contract = response_contract(OwnershipResolution)
 
@@ -892,7 +892,7 @@ def test_response_contract_has_real_ownership_example() -> None:
 def test_response_contract_no_fabricated_example_for_unknown_model() -> None:
     from pydantic import BaseModel
 
-    from app.prompts.prompt_sections import response_contract
+    from worktop.test_agent.app.prompts.prompt_sections import response_contract
 
     class UnknownDecision(BaseModel):
         verdict: str
@@ -905,7 +905,7 @@ def test_response_contract_no_fabricated_example_for_unknown_model() -> None:
 
 
 def test_patchset_contract_includes_labeled_action_examples() -> None:
-    from app.prompts.prompt_sections import response_contract
+    from worktop.test_agent.app.prompts.prompt_sections import response_contract
 
     contract = response_contract(PatchSet)
 
@@ -917,9 +917,9 @@ def test_patchset_contract_includes_labeled_action_examples() -> None:
 
 
 def test_curated_inventory_strips_hashes_caps_lists_and_prioritizes_e2e() -> None:
-    from app.prompts.prompt_sections import curated_inventory
-    from app.schemas.repository_inventory import RepositoryInventory
-    from app.schemas.test_file_classification import TestFileClassification
+    from worktop.test_agent.app.prompts.prompt_sections import curated_inventory
+    from worktop.test_agent.app.schemas.repository_inventory import RepositoryInventory
+    from worktop.test_agent.app.schemas.test_file_classification import TestFileClassification
 
     inventory = RepositoryInventory(
         repo_path="/tmp/repo",
@@ -943,7 +943,7 @@ def test_curated_inventory_strips_hashes_caps_lists_and_prioritizes_e2e() -> Non
 
 
 def test_curated_test_units_caps_candidates_and_truncates_excerpts() -> None:
-    from app.prompts.prompt_sections import curated_test_units
+    from worktop.test_agent.app.prompts.prompt_sections import curated_test_units
 
     units = [
         BehavioralTestUnit(
@@ -965,8 +965,8 @@ def test_curated_test_units_caps_candidates_and_truncates_excerpts() -> None:
 
 
 def test_spec_placement_prompt_excludes_file_hashes() -> None:
-    from app.prompts.spec_placement_prompt import build_spec_placement_prompt
-    from app.schemas.repository_inventory import RepositoryInventory
+    from worktop.test_agent.app.prompts.spec_placement_prompt import build_spec_placement_prompt
+    from worktop.test_agent.app.schemas.repository_inventory import RepositoryInventory
 
     prompt = build_spec_placement_prompt(
         RepositoryInventory(
@@ -981,7 +981,7 @@ def test_spec_placement_prompt_excludes_file_hashes() -> None:
 
 
 def test_shallow_decision_trace_is_flagged_for_review() -> None:
-    from app.schemas.decision_trace import DecisionTrace
+    from worktop.test_agent.app.schemas.decision_trace import DecisionTrace
 
     orchestrator = GenerationOrchestrator()
     reasons: list[str] = []
@@ -1001,7 +1001,7 @@ def test_shallow_decision_trace_is_flagged_for_review() -> None:
 
 
 def test_complete_decision_trace_is_not_flagged() -> None:
-    from app.schemas.decision_trace import DecisionTrace
+    from worktop.test_agent.app.schemas.decision_trace import DecisionTrace
 
     orchestrator = GenerationOrchestrator()
     reasons: list[str] = []
@@ -1166,8 +1166,8 @@ def test_code_generation_prompt_includes_existing_test_context_contract() -> Non
 
 
 def test_code_generation_prompt_includes_flow_plan_and_ownership() -> None:
-    from app.schemas.flow_merge import FlowMergePlan
-    from app.schemas.ownership_resolution import OwnershipResolution
+    from worktop.test_agent.app.schemas.flow_merge import FlowMergePlan
+    from worktop.test_agent.app.schemas.ownership_resolution import OwnershipResolution
 
     prompt = build_code_generation_prompt(
         placement=SpecPlacementDecision(
@@ -1332,7 +1332,7 @@ def test_high_confidence_action_is_not_flagged() -> None:
 
 
 def test_result_builder_marks_needs_review_when_reasons_present() -> None:
-    from app.services.result_builder_service import ResultBuilderService
+    from worktop.test_agent.app.services.result_builder_service import ResultBuilderService
 
     request = GenerationRequest(
         job_id="job-1",
@@ -1520,7 +1520,7 @@ class FakeCritic:
 
 
 def test_repo_strategy_bootstraps_unrecognized_framework_with_dev_script(tmp_path) -> None:
-    from app.services.repo_strategy_service import RepoStrategyService
+    from worktop.test_agent.app.services.repo_strategy_service import RepoStrategyService
 
     # No Angular/React signal at all — just a runnable dev server script.
     _write_package_json(
@@ -1538,8 +1538,8 @@ def test_repo_strategy_bootstraps_unrecognized_framework_with_dev_script(tmp_pat
 
 
 def test_spec_placement_agent_explores_before_deciding(tmp_path) -> None:
-    from app.agents.spec_placement_agent import SpecPlacementAgent
-    from app.schemas.repository_inventory import RepositoryInventory
+    from worktop.test_agent.app.agents.spec_placement_agent import SpecPlacementAgent
+    from worktop.test_agent.app.schemas.repository_inventory import RepositoryInventory
 
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests" / "plans.spec.ts").write_text(
