@@ -4,6 +4,10 @@
     "baseUrl": "./",
     "paths": {
       "@api-test-generation/*": ["../../api-agent/frontend/test-generation/*"],
+      "@angular/common/http": [
+        "./node_modules/@angular/common/http",
+        "./node_modules/@angular/common/fesm2022/http.mjs"
+      ],
       "@angular/*": ["./node_modules/@angular/*"],
       "rxjs": ["./node_modules/rxjs"],
       "rxjs/*": ["./node_modules/rxjs/*"],
