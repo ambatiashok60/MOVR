@@ -1117,3 +1117,130 @@ app/utils/
 The architecture is intentionally modular so each workflow stage can be
 implemented and tested independently while preserving one consistent generation
 contract.
+
+## Enterprise Intelligence (Phase 2 — Gaps 25–36)
+
+Phase 1 made the generator technically correct, structurally safe, and
+explainable. Phase 2 layers the platform-value capabilities that make it
+enterprise-ready: trustworthy, measurable, governable, and extensible. None of
+these change *how* code is generated; they change what the platform can prove
+about every generation.
+
+### Coverage Preservation (Gap 25)
+
+The engine never assumes an extension preserved existing coverage — it proves
+it. A behavioral coverage graph (assertions, navigations, API touchpoints,
+interactions, data inputs per test) is built before generation from the
+behavioral inventory and again after patches land by re-parsing every patched
+spec. The diff is classified as preserved / added / removed / modified; removed
+or weakened behavior becomes a review reason and the full
+`CoveragePreservationReport` ships on the result.
+
+### Test Value Analysis (Gap 26)
+
+A generated test that compiles is not necessarily valuable. Every newly
+generated test is compared against the closest existing test by
+outcome-signal overlap and classified as `NEW_COVERAGE`,
+`MEANINGFUL_VARIATION`, `PARTIAL_DUPLICATE`, `FULL_DUPLICATE`, or `LOW_VALUE`.
+A `FULL_DUPLICATE` is never accepted silently — it requires approval (unless
+the repository policy explicitly tolerates duplicates), and assertion-free
+tests are flagged as low value.
+
+### Requirement Traceability (Gap 27)
+
+Every story step and expected assertion is mapped to the code that implements
+it — a generated patch or a reused existing flow — with evidence and a match
+score. Requirements that trace to nothing are reported `missing` and become
+review reasons, so "where is requirement 5 implemented?" is answerable
+directly from the `TraceabilityMatrix` on the result.
+
+### Human Review Intelligence (Gap 28)
+
+Instead of a bare diff, every run produces a `ReviewReport`: summary, files
+changed with reasons, flows reused and added, why the action and placement
+were chosen, methods created vs reused, locators reused, assertions added,
+validation outcome, and remaining risks — with a rendered markdown version.
+Goal: a five-minute review instead of a thirty-minute diff archaeology.
+
+### Repository Policy Engine (Gap 29)
+
+Different repositories have different rules. A policy file committed in the
+target repository (`.movr/test-agent-policy.yaml`, YAML or JSON — parsed even
+without a YAML dependency) declares them:
+
+```yaml
+generation:
+  allow_before_each_updates: false
+  assertion_location: spec        # spec | page_object | any
+  locator_owner: page_object      # page_object | spec | any
+  require_describe: true
+  rollback_failed_patch: true
+  allow_full_duplicates: false
+```
+
+Policy checks join the patch-plan guard, so violations route through the
+repair loop like any other structural failure; exhausted failures roll the
+repository back when the policy demands a clean tree.
+
+### Deterministic Generation (Gap 30)
+
+Every run freezes its inputs into a `GenerationManifest`: repository snapshot
+digest and head, content-hashed prompt versions (a prompt edit changes the
+recorded version automatically), model provider, generation settings, policy
+snapshot, stage decisions with confidence, and patch digests — plus an
+overall fingerprint so identical inputs are provably identical and divergent
+outputs can be explained input-by-input.
+
+### Regression Benchmark Suite (Gap 31)
+
+Golden scenarios in `benchmarks/golden_scenarios.json` (append, extend,
+create-spec, patch repair) run through the generator and are scored:
+append/extend/create accuracy, decision accuracy, reuse rate, patch success,
+repair success, validation pass rate, latency. `BenchmarkRunner.
+detect_regressions` compares reports so a prompt change that improves one
+behavior and silently regresses another is caught by numbers.
+
+### Cost & Latency Governance (Gap 32)
+
+Each run gets a `GenerationBudget` with hard ceilings (configurable via
+settings): max LLM calls, tool calls, repository reads, prompt volume, and
+wall-clock time. All agents run through a budget-charging LLM client wrapper;
+exploration loops charge repository reads; repair loops charge attempts.
+Exceeding any ceiling raises an explicit escalation instead of continuing
+forever, and the usage report ships on every successful result.
+
+### Workspace Isolation (Gap 33)
+
+Every job acquires a per-repository lock and an isolated workspace with a
+patch journal, rollback journal, and pre-patch snapshots of every file it
+touches. Two jobs on the same repository can never interleave writes or
+validate each other's files; stale locks from dead jobs are reclaimed after a
+timeout.
+
+### Idempotency (Gap 34)
+
+Generations are fingerprinted from the repository version (head + file
+hashes) plus the story name and steps. A repeated Generate against an
+unchanged repository returns "equivalent patch already generated" with a
+pointer to the original job instead of appending an identical test again.
+
+### Repository Security & Data Governance (Gap 35)
+
+Files are classified safe / internal / sensitive / restricted before anything
+reaches an LLM. Restricted material (env files, key material, credential
+stores) is never released in any form; everything else is scrubbed of secrets
+(passwords, API keys, cloud/GitHub/Slack tokens, JWTs, private key blocks).
+The model-directed exploration path enforces this on reads and search
+snippets, and an audit records files sent, files blocked, prompt volume, and
+redaction counts.
+
+### Technology-Agnostic Architecture (Gap 36)
+
+Core intelligence (flow reasoning, decisions, patch loops, validation/repair,
+coverage, reporting) is separated from the technology layer behind a
+`TechnologyAdapter` interface: `analyze_repository`, `classify_test_files`,
+`build_inventory`, `build_flow_inventory`, `apply_patch`, `rollback`,
+`validate`. `PlaywrightAdapter` implements it with the existing services; an
+`AdapterRegistry` resolves the configured technology. Supporting REST
+Assured, GraphQL, or gRPC later means writing an adapter — not duplicating
+the orchestration.

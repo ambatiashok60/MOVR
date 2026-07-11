@@ -629,3 +629,68 @@ shallow-trace review flag.
   layer.
 - Direct repository update is the intended beta behavior, with patch results,
   diffs, reasoning, confidence, and validation returned to the caller.
+
+## Enterprise Intelligence (Phase 2 — Gaps 25–36)
+
+### `app/coverage/coverage_preservation_service.py`
+Builds behavioral coverage graphs before and after generation and diffs them
+(preserved / added / removed / modified). Lost or weakened coverage becomes a
+review reason. Schemas in `app/schemas/coverage.py`.
+
+### `app/services/test_value_service.py`
+Scores each newly generated test against the closest existing test by
+outcome-signal overlap and issues NEW_COVERAGE / MEANINGFUL_VARIATION /
+PARTIAL_DUPLICATE / FULL_DUPLICATE / LOW_VALUE verdicts. Schemas in
+`app/schemas/test_value.py`.
+
+### `app/services/traceability_service.py`
+Requirement traceability matrix: maps story steps and intent assertions to
+generated patches or reused existing flows; missing requirements are flagged.
+Schemas in `app/schemas/traceability.py`.
+
+### `app/services/review_report_service.py`
+Builds the structured + markdown developer review report (files changed,
+flows reused/added, decision rationale, methods/locators, assertions,
+validation, risks). Schemas in `app/schemas/review_report.py`.
+
+### `app/policy/repository_policy_service.py`
+Loads per-repository generation policy from `.movr/test-agent-policy.yaml`
+(YAML/JSON with dependency-free fallback parser) and enforces it as
+patch-plan guard checks. Schemas in `app/schemas/repository_policy.py`.
+
+### `app/services/generation_manifest_service.py`
+Freezes run inputs — repository snapshot digest, prompt content digests,
+model, settings, policy, decisions, patch digests — into a reproducibility
+manifest with an overall fingerprint. Schemas in
+`app/schemas/generation_manifest.py`.
+
+### `app/benchmark/benchmark_runner.py`
+Golden-scenario benchmark runner with accuracy/reuse/repair/validation/latency
+metrics and cross-report regression detection. Golden scenarios in
+`benchmarks/golden_scenarios.json`; schemas in `app/schemas/benchmark.py`.
+
+### `app/governance/generation_budget.py`
+Per-run cost/latency budget (LLM calls, tool calls, repository reads, prompt
+volume, wall-clock) with a budget-charging LLM client wrapper; exceeding a
+ceiling raises `BudgetExceededError` (escalation). Schemas in
+`app/schemas/generation_budget.py`.
+
+### `app/workspace/workspace_manager.py`
+Per-job isolated workspace: per-repository lock, patch journal, rollback
+journal, pre-patch snapshots, stale-lock reclamation.
+
+### `app/services/idempotency_service.py`
+Generation fingerprint (repo version + story) with a completed-run registry;
+duplicate requests replay the original outcome instead of regenerating.
+Schemas in `app/schemas/idempotency.py`.
+
+### `app/security/data_governance_service.py`
+Classifies files safe/internal/sensitive/restricted, blocks restricted files,
+redacts secrets before content reaches an LLM, and audits everything sent.
+Enforced in `app/tools/repo_explorer_tool.py`.
+
+### `app/adapters/`
+`technology_adapter.py` defines the core-vs-technology boundary;
+`playwright_adapter.py` implements it with the existing services;
+`adapter_registry.py` resolves the configured technology
+(`settings.default_technology`).
