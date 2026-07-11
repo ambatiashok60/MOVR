@@ -5,49 +5,49 @@ from pathlib import Path
 
 import pytest
 
-from app.adapters.adapter_registry import (
+from worktop.test_agent.app.adapters.adapter_registry import (
     UnknownTechnologyError,
     default_adapter_registry,
 )
-from app.adapters.playwright_adapter import PlaywrightAdapter
-from app.adapters.technology_adapter import TechnologyAdapter
-from app.agents.base_agent import BaseAgent
-from app.benchmark.benchmark_runner import BenchmarkRunner
-from app.coverage.coverage_preservation_service import CoveragePreservationService
-from app.schemas.benchmark import (
+from worktop.test_agent.app.adapters.playwright_adapter import PlaywrightAdapter
+from worktop.test_agent.app.adapters.technology_adapter import TechnologyAdapter
+from worktop.test_agent.app.agents.base_agent import BaseAgent
+from worktop.test_agent.app.benchmark.benchmark_runner import BenchmarkRunner
+from worktop.test_agent.app.coverage.coverage_preservation_service import CoveragePreservationService
+from worktop.test_agent.app.schemas.benchmark import (
     BenchmarkExpectation,
     BenchmarkReport,
     BenchmarkScenario,
 )
-from app.governance.generation_budget import (
+from worktop.test_agent.app.governance.generation_budget import (
     BudgetedLLMClient,
     BudgetExceededError,
     GenerationBudget,
 )
-from app.schemas.exploration import ExplorationRequest, SpecPlacementTurn
-from app.schemas.generation_budget import BudgetLimits
-from app.security.data_governance_service import DataGovernanceService
-from app.tools.repo_explorer_tool import RepoExplorer
-from app.schemas.behavioral_test_unit import AnchorFlowContext, BehavioralTestUnit
-from app.schemas.code_patch import AppliedPatch, CodePatch, PatchSet, PatchWriteResult
-from app.schemas.decision_trace import DecisionTrace
-from app.schemas.functional_intent import FunctionalIntent
-from app.schemas.generation_request import GenerationRequest
-from app.policy.repository_policy_service import RepositoryPolicyService
-from app.schemas.repository_inventory import RepositoryInventory
-from app.schemas.repository_policy import GenerationPolicy, RepositoryPolicy
-from app.schemas.spec_placement import SpecPlacementDecision
-from app.services.generation_manifest_service import GenerationManifestService
-from app.schemas.generation_result import GenerationResult
-from app.services.idempotency_service import IdempotencyService
-from app.schemas.test_action_decision import (
+from worktop.test_agent.app.schemas.exploration import ExplorationRequest, SpecPlacementTurn
+from worktop.test_agent.app.schemas.generation_budget import BudgetLimits
+from worktop.test_agent.app.security.data_governance_service import DataGovernanceService
+from worktop.test_agent.app.tools.repo_explorer_tool import RepoExplorer
+from worktop.test_agent.app.schemas.behavioral_test_unit import AnchorFlowContext, BehavioralTestUnit
+from worktop.test_agent.app.schemas.code_patch import AppliedPatch, CodePatch, PatchSet, PatchWriteResult
+from worktop.test_agent.app.schemas.decision_trace import DecisionTrace
+from worktop.test_agent.app.schemas.functional_intent import FunctionalIntent
+from worktop.test_agent.app.schemas.generation_request import GenerationRequest
+from worktop.test_agent.app.policy.repository_policy_service import RepositoryPolicyService
+from worktop.test_agent.app.schemas.repository_inventory import RepositoryInventory
+from worktop.test_agent.app.schemas.repository_policy import GenerationPolicy, RepositoryPolicy
+from worktop.test_agent.app.schemas.spec_placement import SpecPlacementDecision
+from worktop.test_agent.app.services.generation_manifest_service import GenerationManifestService
+from worktop.test_agent.app.schemas.generation_result import GenerationResult
+from worktop.test_agent.app.services.idempotency_service import IdempotencyService
+from worktop.test_agent.app.schemas.test_action_decision import (
     TestActionDecision as PlaywrightTestActionDecision,
 )
-from app.schemas.validation_result import ValidationCheck, ValidationResult
-from app.services.review_report_service import ReviewReportService
-from app.services.test_value_service import TestValueService
-from app.services.traceability_service import TraceabilityService
-from app.workspace.workspace_manager import WorkspaceLockedError, WorkspaceManager
+from worktop.test_agent.app.schemas.validation_result import ValidationCheck, ValidationResult
+from worktop.test_agent.app.services.review_report_service import ReviewReportService
+from worktop.test_agent.app.services.test_value_service import TestValueService
+from worktop.test_agent.app.services.traceability_service import TraceabilityService
+from worktop.test_agent.app.workspace.workspace_manager import WorkspaceLockedError, WorkspaceManager
 
 
 EXISTING_SPEC = """import { test, expect } from '@playwright/test';
@@ -983,7 +983,7 @@ class TestTechnologyAdapters:
         assert registry.resolve("rest_assured").technology == "rest_assured"
 
     def test_orchestrator_drives_the_adapter_boundary(self, tmp_path: Path) -> None:
-        from app.services.generation_orchestrator import GenerationOrchestrator
+        from worktop.test_agent.app.services.generation_orchestrator import GenerationOrchestrator
 
         orchestrator = GenerationOrchestrator()
 

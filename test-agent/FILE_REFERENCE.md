@@ -27,27 +27,27 @@ Ignore rules for generated files, local env files, and Python artifacts.
 
 ## App Entry
 
-### `app/main.py`
+### `worktop/test_agent/app/main.py`
 
 FastAPI application bootstrap. Registers generation, job, and event route
 modules. Also maps unsupported repository errors into a structured `422`
 response with the detected repository profile.
 
-### `app/config.py`
+### `worktop/test_agent/app/config.py`
 
 Application settings used by the service. Includes the decision-confidence
 thresholds `min_placement_confidence`, `min_action_confidence`,
 `min_ownership_confidence`, and `min_flow_merge_confidence` that gate the
 decision stages (see the README's Decision Intelligence Hardening section).
 
-### `app/errors.py`
+### `worktop/test_agent/app/errors.py`
 
 Domain-specific exceptions. The main one is `UnsupportedRepositoryError`, used
 when the repository does not fit the beta-supported Playwright scope.
 
 ## API Routes
 
-### `app/api/routes/generation_routes.py`
+### `worktop/test_agent/app/api/routes/generation_routes.py`
 
 Defines the main generation endpoint:
 
@@ -57,7 +57,7 @@ POST /api/playwright/generate
 
 It accepts a `GenerationRequest` and delegates to `GenerationOrchestrator`.
 
-### `app/api/routes/job_routes.py`
+### `worktop/test_agent/app/api/routes/job_routes.py`
 
 Defines the job status endpoint:
 
@@ -68,7 +68,7 @@ GET /api/playwright/jobs/{job_id}
 Currently returns a placeholder job shape and is ready for persistence/status
 store integration.
 
-### `app/api/routes/event_routes.py`
+### `worktop/test_agent/app/api/routes/event_routes.py`
 
 Defines the SSE endpoint:
 
@@ -81,30 +81,30 @@ phase.
 
 ## Runtime And LLM
 
-### `app/runtime/generation_runtime.py`
+### `worktop/test_agent/app/runtime/generation_runtime.py`
 
 Builds per-generation runtime context from a request. Creates the LLM client
 through `LLMClientFactory` and carries job id, tenant id, repo path, branch, DB
 session, and model client.
 
-### `app/llm/llm_client.py`
+### `worktop/test_agent/app/llm/llm_client.py`
 
 Protocol/interface for LLM clients. Defines plain completion and structured
 completion methods.
 
-### `app/llm/llm_client_factory.py`
+### `worktop/test_agent/app/llm/llm_client_factory.py`
 
 Creates the concrete model client. It logs model-client creation and wraps
 Worktop model-client failures into a generation-friendly error.
 
-### `app/llm/default_llm_client.py`
+### `worktop/test_agent/app/llm/default_llm_client.py`
 
 Adapter around Worktop's `DefaultLLMClient`. Handles prompt completion,
 structured JSON parsing into Pydantic models, and response text extraction.
 
 ## Orchestration
 
-### `app/services/generation_orchestrator.py`
+### `worktop/test_agent/app/services/generation_orchestrator.py`
 
 Main workflow coordinator. The current flow is:
 
@@ -154,66 +154,66 @@ in the README's Decision Intelligence Hardening section. Key private methods:
 
 ## Agents
 
-### `app/agents/base_agent.py`
+### `worktop/test_agent/app/agents/base_agent.py`
 
 Base class for agent wrappers. Provides common model access, structured
 completion, and logging helpers.
 
-### `app/agents/functional_intent_agent.py`
+### `worktop/test_agent/app/agents/functional_intent_agent.py`
 
 Extracts structured functional intent from the user-provided test case name and
 steps.
 
-### `app/agents/source_mapper_agent.py`
+### `worktop/test_agent/app/agents/source_mapper_agent.py`
 
 Maps functional intent to likely source files, routes, components, or UI areas.
 
-### `app/agents/spec_placement_agent.py`
+### `worktop/test_agent/app/agents/spec_placement_agent.py`
 
 Decides where generated or updated Playwright coverage should live. Produces a
 `SpecPlacementDecision`.
 
-### `app/agents/test_action_decision_agent.py`
+### `worktop/test_agent/app/agents/test_action_decision_agent.py`
 
 Decides whether to create a new test, append to an existing block, update an
 existing test, or perform another test-action shape.
 
-### `app/agents/flow_merge_agent.py`
+### `worktop/test_agent/app/agents/flow_merge_agent.py`
 
 Plans how requested steps should merge with an existing proven flow. Takes the
 `ExistingTestContext` so `stable_region`/`preserved_steps` are derived from the
 actual test source rather than the functional intent. Runs only for
 `extend_existing_test`.
 
-### `app/agents/ownership_resolution_agent.py`
+### `worktop/test_agent/app/agents/ownership_resolution_agent.py`
 
 Resolves ownership of files, specs, page objects, fixtures, and helper areas
 from repository inventory. Produces a first-class decision with `create_new`
 (reuse vs create a new owner), bounded confidence, and a `DecisionTrace`; the
 deterministic fallback reuses an existing owner rather than inventing one.
 
-### `app/agents/locator_reasoning_agent.py`
+### `worktop/test_agent/app/agents/locator_reasoning_agent.py`
 
 Determines locator approaches from source intelligence and UI evidence.
 Produces an evidence-grounded `LocatorDecisionSet` that is fed into the code
 generation prompt (optional stage — failure never aborts generation).
 
-### `app/agents/code_generation_agent.py`
+### `worktop/test_agent/app/agents/code_generation_agent.py`
 
 Model-facing code generation agent. Produces patch/code output based on
 placement, action, and UI context.
 
-### `app/agents/critic_agent.py`
+### `worktop/test_agent/app/agents/critic_agent.py`
 
 Reviews generated patches before they are written. Used as a quality gate for
 patch content.
 
-### `app/agents/repair_agent.py`
+### `worktop/test_agent/app/agents/repair_agent.py`
 
 Future repair path for validation failures. Intended to revise patches after
 validator feedback.
 
-### `app/agents/candidate_test_ranking_agent.py`
+### `worktop/test_agent/app/agents/candidate_test_ranking_agent.py`
 
 LLM structured-output agent that ranks candidate existing behavioral tests by
 behavioral overlap with the `FunctionalIntent` (shared route, screen, journey,
@@ -223,7 +223,7 @@ one-or-fewer candidates, or on error.
 
 ## Prompts
 
-### `app/prompts/prompt_sections.py`
+### `worktop/test_agent/app/prompts/prompt_sections.py`
 
 Reusable prompt section helpers shared by other prompt builders:
 
@@ -237,44 +237,44 @@ Reusable prompt section helpers shared by other prompt builders:
 - `playwright_best_practices()` — the modern-Playwright scaffold injected for
   `create_new_spec`, governing when the repository has nothing to reuse.
 
-### `app/prompts/functional_intent_prompt.py`
+### `worktop/test_agent/app/prompts/functional_intent_prompt.py`
 
 Prompt for extracting functional intent from natural language steps.
 
-### `app/prompts/source_mapping_prompt.py`
+### `worktop/test_agent/app/prompts/source_mapping_prompt.py`
 
 Prompt for mapping functional intent to application source context.
 
-### `app/prompts/spec_placement_prompt.py`
+### `worktop/test_agent/app/prompts/spec_placement_prompt.py`
 
 Prompt for deciding where the generated Playwright test should live.
 
-### `app/prompts/test_action_prompt.py`
+### `worktop/test_agent/app/prompts/test_action_prompt.py`
 
 Prompt for deciding the test action: create, append, update, or merge.
 
-### `app/prompts/flow_merge_prompt.py`
+### `worktop/test_agent/app/prompts/flow_merge_prompt.py`
 
 Prompt for merging new test flow into an existing proven flow. Instructs the
 model to derive `stable_region`/`preserved_steps` from the supplied existing test
 source and to explain the kept-vs-added decision in a `decision_trace`.
 
-### `app/prompts/candidate_ranking_prompt.py`
+### `worktop/test_agent/app/prompts/candidate_ranking_prompt.py`
 
 Prompt for ranking existing tests by how well each already owns the requested
 behavior. Consumed by `CandidateTestRankingAgent`.
 
-### `app/prompts/ownership_resolution_prompt.py`
+### `worktop/test_agent/app/prompts/ownership_resolution_prompt.py`
 
 Prompt for resolving file/module ownership. Grounded in the functional intent
 and the needed locators/components from source intelligence, with
 reuse-vs-create standards and a required `decision_trace`.
 
-### `app/prompts/locator_reasoning_prompt.py`
+### `worktop/test_agent/app/prompts/locator_reasoning_prompt.py`
 
 Prompt for choosing locator strategy.
 
-### `app/prompts/code_generation_prompt.py`
+### `worktop/test_agent/app/prompts/code_generation_prompt.py`
 
 Prompt for producing final code patches. Renders and enforces reuse of the
 `ExistingTestContext` (extend target), `AnchorFlowContext` (append reuse base /
@@ -284,101 +284,101 @@ create style template), `FlowMergePlan` (stable/extension regions),
 best-practices scaffold for `create_new_spec` and forbids referencing members or
 imports that do not exist in the repo or the emitted patch set.
 
-### `app/prompts/patch_review_prompt.py`
+### `worktop/test_agent/app/prompts/patch_review_prompt.py`
 
 Prompt for critic/review pass over generated patches.
 
 ## Schemas
 
-### `app/schemas/generation_request.py`
+### `worktop/test_agent/app/schemas/generation_request.py`
 
 Input request model for Playwright test generation. Carries job id, repo path,
 branch, tenant id, test case name, steps, and validation preference.
 
-### `app/schemas/generation_result.py`
+### `worktop/test_agent/app/schemas/generation_result.py`
 
 Final generation response model. Contains files changed, diff summary,
 confidence, decision trace, validation, repo profile, and the review signal
 `needs_review` + `review_reasons` populated by the confidence gates.
 
-### `app/schemas/generation_job.py`
+### `worktop/test_agent/app/schemas/generation_job.py`
 
 Job status/result shape for the job route.
 
-### `app/schemas/repo_profile.py`
+### `worktop/test_agent/app/schemas/repo_profile.py`
 
 Repository support/profile model. Captures support status, blockers, warnings,
 Playwright configs, package manager, package scripts, frameworks, lockfiles,
 monorepo tooling, and other repo-level signals. Includes `requires_bootstrap`
 for qualifying UI repos with no E2E framework yet.
 
-### `app/schemas/technology_profile.py`
+### `worktop/test_agent/app/schemas/technology_profile.py`
 
 Technology classification output for the repository.
 
-### `app/schemas/repository_inventory.py`
+### `worktop/test_agent/app/schemas/repository_inventory.py`
 
 Repository inventory model. Tracks discovered specs, source files, page
 objects, fixtures, helpers, config files, and other repository assets.
 
-### `app/schemas/test_file_classification.py`
+### `worktop/test_agent/app/schemas/test_file_classification.py`
 
 Classification model for test/source/helper files.
 
-### `app/schemas/playwright_ui_context.py`
+### `worktop/test_agent/app/schemas/playwright_ui_context.py`
 
 UI intelligence model assembled from repository inventory, source evidence, and
 Playwright conventions.
 
-### `app/schemas/functional_intent.py`
+### `worktop/test_agent/app/schemas/functional_intent.py`
 
 Structured representation of the requested functional behavior.
 
-### `app/schemas/source_intelligence.py`
+### `worktop/test_agent/app/schemas/source_intelligence.py`
 
 Source mapping output. Links functional intent to likely app source, UI
 components, routes, and evidence.
 
-### `app/schemas/behavioral_test_unit.py`
+### `worktop/test_agent/app/schemas/behavioral_test_unit.py`
 
 Parsed existing Playwright behavior unit (test block with title, location, body,
 metadata). Also defines `ExistingTestContext` (the exact edit target for an
 extend) and `AnchorFlowContext` (a reference-only sibling test whose setup an
 appended test should reuse — never patched).
 
-### `app/schemas/spec_placement.py`
+### `worktop/test_agent/app/schemas/spec_placement.py`
 
 Spec placement decision model: target file, `create_new`, bounded confidence,
 and decision trace. Includes `SpecPlacementDecisions` label constants.
 
-### `app/schemas/test_action_decision.py`
+### `worktop/test_agent/app/schemas/test_action_decision.py`
 
 Decision model for the test action. `action` is a `Literal` of
 `extend_existing_test` / `append_new_test` / `create_new_spec` (invalid values
 fail validation and route to the deterministic fallback), backed by the
 `TestActions` constants, with bounded confidence.
 
-### `app/schemas/candidate_ranking.py`
+### `worktop/test_agent/app/schemas/candidate_ranking.py`
 
 Ranking output for existing tests: `CandidateRanking` holding `RankedCandidateRef`
 entries (file/title/start_line/relevance/reason). Produced by the ranking agent.
 
-### `app/schemas/flow_merge.py`
+### `worktop/test_agent/app/schemas/flow_merge.py`
 
 Flow merge plan model: `stable_region`, `extension_region`, `preserved_steps`,
 `added_steps`, plus bounded confidence and a `DecisionTrace` for the
 kept-vs-added reasoning.
 
-### `app/schemas/ownership_resolution.py`
+### `worktop/test_agent/app/schemas/ownership_resolution.py`
 
 Ownership resolution output for files/modules/helpers/specs. Carries `create_new`
 (reuse vs create a new owner), bounded confidence, and a `DecisionTrace`.
 
-### `app/schemas/locator_decision.py`
+### `worktop/test_agent/app/schemas/locator_decision.py`
 
 Locator strategy decision model.
 
-### `app/schemas/code_patch.py`
+### `worktop/test_agent/app/schemas/code_patch.py`
 
 Patch models:
 
@@ -390,18 +390,18 @@ PatchWriteResult
 
 Used by code generation and scoped patch writing.
 
-### `app/schemas/decision_trace.py`
+### `worktop/test_agent/app/schemas/decision_trace.py`
 
 Decision trace model used to expose reasoning from placement/action decisions.
 
-### `app/schemas/validation_result.py`
+### `worktop/test_agent/app/schemas/validation_result.py`
 
 Validation result and check models for syntax, Playwright, repo command, and UI
 quality validation.
 
 ## Services
 
-### `app/services/repo_strategy_service.py`
+### `worktop/test_agent/app/services/repo_strategy_service.py`
 
 Classifies whether the repository is supported, supported with warnings, or
 unsupported for beta Playwright generation. A qualifying Angular/React
@@ -409,7 +409,7 @@ TypeScript UI repo with no Playwright framework at all is classified as a
 bootstrap candidate (`requires_bootstrap=true`) instead of unsupported; a repo
 with a Playwright config but no specs yet is a warning, not a blocker.
 
-### `app/services/bootstrap_scaffold_service.py`
+### `worktop/test_agent/app/services/bootstrap_scaffold_service.py`
 
 Deterministic Playwright framework scaffold for bootstrap repos: emits
 `playwright.config.ts` (testDir `./e2e`, CI retries, webServer from the repo's
@@ -417,164 +417,164 @@ start/dev script), a `package.json` merge adding `@playwright/test` +
 `test:e2e`, and an `e2e/fixtures.ts` entry point. Merges with LLM-generated
 patches; the deterministic scaffold wins on path collision.
 
-### `app/services/technology_intelligence_service.py`
+### `worktop/test_agent/app/services/technology_intelligence_service.py`
 
 Detects repository technology profile from repo profile and support signals.
 
-### `app/services/test_file_classifier_service.py`
+### `worktop/test_agent/app/services/test_file_classifier_service.py`
 
 Classifies files as specs, helpers, fixtures, page objects, source, etc.
 
-### `app/services/inventory_service.py`
+### `worktop/test_agent/app/services/inventory_service.py`
 
 Builds repository inventory using file classifications and repository scanning.
 
-### `app/services/playwright_ui_intelligence_service.py`
+### `worktop/test_agent/app/services/playwright_ui_intelligence_service.py`
 
 Builds Playwright/UI context from repository inventory and repo profile.
 
-### `app/services/source_intelligence_service.py`
+### `worktop/test_agent/app/services/source_intelligence_service.py`
 
 Maps functional intent to source intelligence using the source mapper agent.
 
-### `app/services/behavioral_inventory_service.py`
+### `worktop/test_agent/app/services/behavioral_inventory_service.py`
 
 Extracts behavioral test units from existing Playwright test inventory.
 
-### `app/services/spec_placement_service.py`
+### `worktop/test_agent/app/services/spec_placement_service.py`
 
 Decides where to place the generated/updated spec using the placement agent.
 
-### `app/services/test_action_service.py`
+### `worktop/test_agent/app/services/test_action_service.py`
 
 Decides what action to take on tests. First runs the LLM ranking agent over the
 behavioral candidates (using the functional intent), then the decision agent over
 the ranked list, with a deterministic fallback.
 
-### `app/services/flow_merge_service.py`
+### `worktop/test_agent/app/services/flow_merge_service.py`
 
 Plans how new steps should merge into the existing proven flow. Accepts the
 `ExistingTestContext` so the plan is grounded in the actual test source.
 
-### `app/services/ownership_resolution_service.py`
+### `worktop/test_agent/app/services/ownership_resolution_service.py`
 
 Resolves ownership of existing repo files and test-support structures.
 
-### `app/services/code_generation_service.py`
+### `worktop/test_agent/app/services/code_generation_service.py`
 
 Generates patch sets using the code generation agent from placement, action, UI
 context, and the grounding signals: `ExistingTestContext`, `FlowMergePlan`,
 `OwnershipResolution`, and `AnchorFlowContext`.
 
-### `app/services/result_builder_service.py`
+### `worktop/test_agent/app/services/result_builder_service.py`
 
 Builds the final `GenerationResult` from request, patches, patch-write result,
 validation, decision traces, and repo profile. Sets `needs_review` /
 `review_reasons` when the confidence gates flagged any decision.
 
-### `app/services/staleness_service.py`
+### `worktop/test_agent/app/services/staleness_service.py`
 
 Compares repo HEAD values to decide whether cached inventory is stale.
 
 ## Inventory
 
-### `app/inventory/inventory_builder.py`
+### `worktop/test_agent/app/inventory/inventory_builder.py`
 
 Builds repository inventory by scanning paths and grouping files by role.
 
-### `app/inventory/inventory_reader.py`
+### `worktop/test_agent/app/inventory/inventory_reader.py`
 
 Convenience reader for inventory subsets such as E2E specs.
 
-### `app/inventory/repository_inventory_cache.py`
+### `worktop/test_agent/app/inventory/repository_inventory_cache.py`
 
 Loads and saves repository inventory cache files.
 
-### `app/inventory/file_fingerprint.py`
+### `worktop/test_agent/app/inventory/file_fingerprint.py`
 
 Creates file fingerprints for cache/staleness decisions.
 
-### `app/inventory/dependency_map.py`
+### `worktop/test_agent/app/inventory/dependency_map.py`
 
 Simple dependency map model for source-to-target relationships.
 
 ## Tools
 
-### `app/tools/file_reader_tool.py`
+### `worktop/test_agent/app/tools/file_reader_tool.py`
 
 Safe file reader for repository-relative paths.
 
-### `app/tools/file_writer_tool.py`
+### `worktop/test_agent/app/tools/file_writer_tool.py`
 
 Safe file writer for repository-relative paths.
 
-### `app/tools/search_tool.py`
+### `worktop/test_agent/app/tools/search_tool.py`
 
 Search helper for repository files.
 
-### `app/tools/git_tool.py`
+### `worktop/test_agent/app/tools/git_tool.py`
 
 Git helper for HEAD/diff information.
 
-### `app/tools/command_runner_tool.py`
+### `worktop/test_agent/app/tools/command_runner_tool.py`
 
 Runs repository commands with timeout and captured output.
 
-### `app/tools/playwright_parser_tool.py`
+### `worktop/test_agent/app/tools/playwright_parser_tool.py`
 
 Parses Playwright specs to extract `test(...)` blocks and `describe(...)`
 blocks with line ranges and behavioral metadata.
 
-### `app/tools/angular_parser_tool.py`
+### `worktop/test_agent/app/tools/angular_parser_tool.py`
 
 Extracts Angular-specific source signals from files.
 
-### `app/tools/ts_ast_parser_tool.py`
+### `worktop/test_agent/app/tools/ts_ast_parser_tool.py`
 
 TypeScript AST/source parser placeholder for extracting structured TS signals.
 
 ## Patching
 
-### `app/patching/scoped_patch_writer.py`
+### `worktop/test_agent/app/patching/scoped_patch_writer.py`
 
 Applies generated patches safely. Resolves safe paths, creates backups, writes
 content, and produces unified diffs.
 
-### `app/patching/patch_planner.py`
+### `worktop/test_agent/app/patching/patch_planner.py`
 
 Validates patch shape before writing.
 
-### `app/patching/backup_manager.py`
+### `worktop/test_agent/app/patching/backup_manager.py`
 
 Creates backups before file updates.
 
-### `app/patching/diff_generator.py`
+### `worktop/test_agent/app/patching/diff_generator.py`
 
 Generates unified diffs for changed files.
 
 ## Validation
 
-### `app/validation/playwright_validator.py`
+### `worktop/test_agent/app/validation/playwright_validator.py`
 
 Validates Playwright test discovery and duplicate test titles.
 
-### `app/validation/playwright_ui_quality_validator.py`
+### `worktop/test_agent/app/validation/playwright_ui_quality_validator.py`
 
 Checks Playwright/UI quality signals such as assertions and basic test
 structure.
 
-### `app/validation/repo_command_validator.py`
+### `worktop/test_agent/app/validation/repo_command_validator.py`
 
 Runs or resolves repo-native validation commands, depending on configured
 validation behavior.
 
-### `app/validation/syntax_validator.py`
+### `worktop/test_agent/app/validation/syntax_validator.py`
 
 Syntax validation placeholder.
 
 ## Utilities
 
-### `app/utils/logging_utils.py`
+### `worktop/test_agent/app/utils/logging_utils.py`
 
 Builds consistent logging metadata for custom Worktop logging utilities.
 
@@ -632,65 +632,76 @@ shallow-trace review flag.
 
 ## Enterprise Intelligence (Phase 2 — Gaps 25–36)
 
-### `app/coverage/coverage_preservation_service.py`
+### `worktop/test_agent/app/coverage/coverage_preservation_service.py`
 Builds behavioral coverage graphs before and after generation and diffs them
 (preserved / added / removed / modified). Lost or weakened coverage becomes a
-review reason. Schemas in `app/schemas/coverage.py`.
+review reason. Schemas in `worktop/test_agent/app/schemas/coverage.py`.
 
-### `app/services/test_value_service.py`
+### `worktop/test_agent/app/services/test_value_service.py`
 Scores each newly generated test against the closest existing test by
 outcome-signal overlap and issues NEW_COVERAGE / MEANINGFUL_VARIATION /
 PARTIAL_DUPLICATE / FULL_DUPLICATE / LOW_VALUE verdicts. Schemas in
-`app/schemas/test_value.py`.
+`worktop/test_agent/app/schemas/test_value.py`.
 
-### `app/services/traceability_service.py`
+### `worktop/test_agent/app/services/traceability_service.py`
 Requirement traceability matrix: maps story steps and intent assertions to
 generated patches or reused existing flows; missing requirements are flagged.
-Schemas in `app/schemas/traceability.py`.
+Schemas in `worktop/test_agent/app/schemas/traceability.py`.
 
-### `app/services/review_report_service.py`
+### `worktop/test_agent/app/services/review_report_service.py`
 Builds the structured + markdown developer review report (files changed,
 flows reused/added, decision rationale, methods/locators, assertions,
-validation, risks). Schemas in `app/schemas/review_report.py`.
+validation, risks). Schemas in `worktop/test_agent/app/schemas/review_report.py`.
 
-### `app/policy/repository_policy_service.py`
+### `worktop/test_agent/app/policy/repository_policy_service.py`
 Loads per-repository generation policy from `.movr/test-agent-policy.yaml`
 (YAML/JSON with dependency-free fallback parser) and enforces it as
-patch-plan guard checks. Schemas in `app/schemas/repository_policy.py`.
+patch-plan guard checks. Schemas in `worktop/test_agent/app/schemas/repository_policy.py`.
 
-### `app/services/generation_manifest_service.py`
+### `worktop/test_agent/app/services/generation_manifest_service.py`
 Freezes run inputs — repository snapshot digest, prompt content digests,
 model, settings, policy, decisions, patch digests — into a reproducibility
 manifest with an overall fingerprint. Schemas in
-`app/schemas/generation_manifest.py`.
+`worktop/test_agent/app/schemas/generation_manifest.py`.
 
-### `app/benchmark/benchmark_runner.py`
+### `worktop/test_agent/app/benchmark/benchmark_runner.py`
 Golden-scenario benchmark runner with accuracy/reuse/repair/validation/latency
 metrics and cross-report regression detection. Golden scenarios in
-`benchmarks/golden_scenarios.json`; schemas in `app/schemas/benchmark.py`.
+`benchmarks/golden_scenarios.json`; schemas in `worktop/test_agent/app/schemas/benchmark.py`.
 
-### `app/governance/generation_budget.py`
+### `worktop/test_agent/app/governance/generation_budget.py`
 Per-run cost/latency budget (LLM calls, tool calls, repository reads, prompt
 volume, wall-clock) with a budget-charging LLM client wrapper; exceeding a
 ceiling raises `BudgetExceededError` (escalation). Schemas in
-`app/schemas/generation_budget.py`.
+`worktop/test_agent/app/schemas/generation_budget.py`.
 
-### `app/workspace/workspace_manager.py`
+### `worktop/test_agent/app/workspace/workspace_manager.py`
 Per-job isolated workspace: per-repository lock, patch journal, rollback
 journal, pre-patch snapshots, stale-lock reclamation.
 
-### `app/services/idempotency_service.py`
+### `worktop/test_agent/app/services/idempotency_service.py`
 Generation fingerprint (repo version + story) with a completed-run registry;
 duplicate requests replay the original outcome instead of regenerating.
-Schemas in `app/schemas/idempotency.py`.
+Schemas in `worktop/test_agent/app/schemas/idempotency.py`.
 
-### `app/security/data_governance_service.py`
+### `worktop/test_agent/app/security/data_governance_service.py`
 Classifies files safe/internal/sensitive/restricted, blocks restricted files,
 redacts secrets before content reaches an LLM, and audits everything sent.
-Enforced in `app/tools/repo_explorer_tool.py`.
+Enforced in `worktop/test_agent/app/tools/repo_explorer_tool.py`.
 
-### `app/adapters/`
+### `worktop/test_agent/app/adapters/`
 `technology_adapter.py` defines the core-vs-technology boundary;
 `playwright_adapter.py` implements it with the existing services;
 `adapter_registry.py` resolves the configured technology
 (`settings.default_technology`).
+
+## Logging Standard (Gap 37)
+
+### `worktop/test_agent/utils/logging.py`
+The single logging implementation: `get_logger(__name__)` (the only supported
+initialization pattern), idempotent `configure_logging`, the shared
+`LOG_FORMAT`, and `stage_log` — the standardized stage scope that renders
+banner / summary / decision sections and "completed in N seconds" timing.
+`worktop/test_agent/app/logging_config.py` re-exports these plus the
+structured `log_event` helper. The standard is enforced by
+`tests/test_logging_standard.py`.
