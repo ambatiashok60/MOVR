@@ -7,6 +7,9 @@ from worktop.api_agent.app.schemas.api_scenario_request import GenerateApiScenar
 from worktop.api_agent.app.schemas.api_scenario_result import ApiScenarioGenerationResult
 from worktop.api_agent.app.schemas.repo_profile import RepoProfile
 from worktop.api_agent.app.policy.repository_policy_service import RepositoryPolicyService
+from worktop.api_agent.app.services.generation_manifest_service import (
+    GenerationManifestService,
+)
 from worktop.api_agent.app.services.scenario_value_service import ScenarioValueService
 from worktop.api_agent.app.services.traceability_service import TraceabilityService
 from worktop.api_agent.app.utils.logging_utils import log_step
@@ -22,6 +25,7 @@ class ApiScenarioGenerationService:
         self.value_service = value_service or ScenarioValueService()
         self.traceability = TraceabilityService()
         self.policy = RepositoryPolicyService()
+        self.manifests = GenerationManifestService()
 
     def generate(
         self,
@@ -48,6 +52,23 @@ class ApiScenarioGenerationService:
             review_reasons.extend(self.value_service.review_reasons(scenario_value))
         traceability = self.traceability.trace_scenarios(request, scenarios)
         review_reasons.extend(self.traceability.review_reasons(traceability))
+        manifest = self.manifests.build(
+            task_id,
+            request.repo_path,
+            branch=request.branch,
+            profile=profile,
+            policy=repository_policy,
+            model_provider=type(getattr(self.agent, "llm", None)).__name__,
+            story_material=[
+                request.story_title or "",
+                request.story_description or "",
+                *request.acceptance_criteria,
+            ],
+            decisions=[
+                ("scenario_plan", scenario.api_scenario_id, "")
+                for scenario in scenarios
+            ],
+        )
         warnings = [*profile.warnings, *output.warnings, *guard_warnings]
         return ApiScenarioGenerationResult(
             task_id=task_id,
@@ -60,6 +81,7 @@ class ApiScenarioGenerationService:
             review_reasons=review_reasons,
             scenario_value=scenario_value,
             traceability=traceability,
+            manifest=manifest,
         )
 
     def _guard_scenarios(

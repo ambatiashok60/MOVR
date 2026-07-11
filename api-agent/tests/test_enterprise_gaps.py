@@ -11,6 +11,9 @@ from worktop.api_agent.app.schemas.api_test_generation_request import (
 )
 from worktop.api_agent.app.schemas.generated_file import GeneratedFile
 from worktop.api_agent.app.policy.repository_policy_service import RepositoryPolicyService
+from worktop.api_agent.app.services.generation_manifest_service import (
+    GenerationManifestService,
+)
 from worktop.api_agent.app.services.review_report_service import ReviewReportService
 from worktop.api_agent.app.services.scenario_value_service import ScenarioValueService
 from worktop.api_agent.app.services.traceability_service import TraceabilityService
@@ -353,3 +356,64 @@ class TestRepositoryPolicy:
         )
 
         assert findings == ["Policy requires at least one negative scenario; the plan has none."]
+
+
+class TestGenerationManifest:
+    def _profile(self) -> RepoProfile:
+        from worktop.api_agent.app.schemas.repo_profile import (
+            ApiEndpointCandidate,
+            ExistingApiTestCandidate,
+        )
+
+        return RepoProfile(
+            repo_path="/tmp/repo",
+            test_frameworks=["restassured"],
+            endpoints=[
+                ApiEndpointCandidate(
+                    method="GET", path="/api/soh-records", source_file="Controller.java"
+                )
+            ],
+            existing_tests=[ExistingApiTestCandidate(path="src/test/Existing.java")],
+        )
+
+    def test_manifest_freezes_run_inputs_and_decisions(self) -> None:
+        service = GenerationManifestService()
+
+        manifest = service.build(
+            "task-1",
+            "/tmp/repo",
+            profile=self._profile(),
+            model_provider="anthropic",
+            story_material=["Retrieve SOH records", "Status 200"],
+            decisions=[("strategy_selection", "java_spring_rest_assured", "high")],
+            artifacts=[("src/test/SohTest.java", "class SohTest {}")],
+        )
+
+        assert manifest.repository_snapshot_digest != ""
+        assert manifest.prompt_versions
+        assert all(len(d) == 12 for d in manifest.prompt_versions.values())
+        assert manifest.settings_snapshot["max_generation_repair_attempts"] == "2"
+        assert manifest.decisions[0].decision == "java_spring_rest_assured"
+        assert manifest.artifacts[0].content_digest != ""
+        assert manifest.generation_fingerprint != ""
+
+    def test_same_inputs_same_fingerprint_changed_inputs_differ(self) -> None:
+        service = GenerationManifestService()
+        kwargs = dict(
+            profile=self._profile(),
+            model_provider="anthropic",
+            story_material=["Retrieve SOH records"],
+        )
+
+        first = service.build("task-1", "/tmp/repo", **kwargs)
+        second = service.build("task-2", "/tmp/repo", **kwargs)
+        changed = service.build(
+            "task-3",
+            "/tmp/repo",
+            profile=self._profile(),
+            model_provider="anthropic",
+            story_material=["A totally different story"],
+        )
+
+        assert first.generation_fingerprint == second.generation_fingerprint
+        assert first.generation_fingerprint != changed.generation_fingerprint

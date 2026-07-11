@@ -6,6 +6,7 @@ from worktop.api_agent.app.schemas.coverage import ApiCoverageReport
 from worktop.api_agent.app.schemas.review_report import ApiReviewReport
 from worktop.api_agent.app.schemas.traceability import TraceabilityMatrix
 from worktop.api_agent.app.schemas.generated_file import GeneratedFile
+from worktop.api_agent.app.schemas.generation_manifest import GenerationManifest
 from worktop.api_agent.app.schemas.mock_stub_plan import MockStubPlan
 from worktop.api_agent.app.schemas.source_context import ExistingTestExample, SourceSnippet
 from worktop.api_agent.app.schemas.validation_result import ValidationResult
@@ -30,3 +31,4 @@ class ApiTestGenerationResult(BaseModel):
     coverage: ApiCoverageReport | None = None
     traceability: TraceabilityMatrix | None = None
     review_report: ApiReviewReport | None = None
+    manifest: GenerationManifest | None = None

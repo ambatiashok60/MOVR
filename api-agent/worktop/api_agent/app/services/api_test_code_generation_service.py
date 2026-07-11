@@ -11,6 +11,9 @@ from worktop.api_agent.app.schemas.source_context import GenerationSourceContext
 from worktop.api_agent.app.coverage.api_coverage_service import ApiCoverageService
 from worktop.api_agent.app.policy.repository_policy_service import RepositoryPolicyService
 from worktop.api_agent.app.services.api_test_file_writer import ApiTestFileWriter
+from worktop.api_agent.app.services.generation_manifest_service import (
+    GenerationManifestService,
+)
 from worktop.api_agent.app.services.review_report_service import ReviewReportService
 from worktop.api_agent.app.services.traceability_service import TraceabilityService
 from worktop.api_agent.app.strategies.strategy_registry import StrategyRegistry
@@ -36,6 +39,7 @@ class ApiTestCodeGenerationService:
         self.traceability = TraceabilityService()
         self.review_reports = ReviewReportService()
         self.policy = RepositoryPolicyService()
+        self.manifests = GenerationManifestService()
 
     def generate(
         self,
@@ -136,6 +140,29 @@ class ApiTestCodeGenerationService:
             review_reasons=review_reasons,
         )
 
+        manifest = self.manifests.build(
+            task_id,
+            request.repo_path,
+            branch=request.branch,
+            profile=profile,
+            policy=repository_policy,
+            model_provider=type(getattr(self.agent, "llm", None)).__name__,
+            story_material=[
+                request.scenario_name,
+                *request.scenario_steps,
+                *request.assertions,
+            ],
+            decisions=[
+                (
+                    "strategy_selection",
+                    output.strategy_name or "unknown",
+                    output.strategy_confidence or "",
+                ),
+                ("execution_target", str(request.execution_target), ""),
+            ],
+            artifacts=[(file.relative_path, file.content) for file in output.files],
+        )
+
         warnings = [*output.warnings, *guard_warnings]
         return ApiTestGenerationResult(
             task_id=task_id,
@@ -156,6 +183,7 @@ class ApiTestCodeGenerationService:
             coverage=coverage_report,
             traceability=traceability,
             review_report=review_report,
+            manifest=manifest,
         )
 
     def _generate_with_healing(
