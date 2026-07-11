@@ -21,7 +21,7 @@ jobs:
       - run: pnpm build
       - uses: actions/upload-artifact@v4
         with:
-          name: combined-preview-${{ github.ref_name }}-${{ github.sha }}
+          name: combined-preview-${{ github.sha }}
           path: ai-workspace/frontend/dist/ai-workspace-preview/browser
           if-no-files-found: error
           retention-days: 14
