@@ -231,5 +231,5 @@ tested outside the full Worktop runtime.
 ```bash
 cd api-agent
 python -m compileall -q app
-uvicorn app.main:app --reload --port 8091
+uvicorn worktop.api_agent.app.main:app --reload --port 8091
 ```

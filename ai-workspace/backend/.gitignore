@@ -1,6 +1,0 @@
-__pycache__/
-*.pyc
-.venv/
-*.egg-info/
-.ai-workspace-state.sqlite3
-.ai-workspace-state.sqlite3-*

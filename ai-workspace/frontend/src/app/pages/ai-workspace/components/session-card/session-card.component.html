@@ -1,4 +1,0 @@
-<li class="session-card" [class.session-card--active]="active" (click)="select.emit()">
-  <span class="session-card__task">{{ session.currentTask || 'Untitled session' }}</span>
-  <span class="session-card__meta">{{ session.mode }} · {{ session.lastActivityAt | timeAgo }}</span>
-</li>
