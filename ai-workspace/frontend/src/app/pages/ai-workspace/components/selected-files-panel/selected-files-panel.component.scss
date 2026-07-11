@@ -1,0 +1,27 @@
+.selected-files-panel {
+  display: flex;
+  flex-direction: column;
+
+  &__row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 0;
+    font-size: 0.85rem;
+  }
+
+  &__path {
+    flex: 1;
+    font-family: monospace;
+  }
+
+  &__priority {
+    font-size: 0.7rem;
+    color: var(--primary-color, #6366f1);
+  }
+
+  &__empty {
+    font-size: 0.8rem;
+    color: var(--text-color-secondary, #94a3b8);
+  }
+}

@@ -1,0 +1,21 @@
+@if (execution) {
+  <div class="execution-timeline">
+    <div class="execution-timeline__status">{{ execution.status | statusLabel }}</div>
+    @for (stage of execution.stages; track stage.id) {
+      <div class="execution-timeline__stage" [class]="'execution-timeline__stage--' + stage.status">
+        <i
+          class="pi"
+          [class.pi-circle]="stage.status === 'pending'"
+          [class.pi-spin]="stage.status === 'active'"
+          [class.pi-spinner]="stage.status === 'active'"
+          [class.pi-check-circle]="stage.status === 'done'"
+          [class.pi-times-circle]="stage.status === 'failed'"
+        ></i>
+        <span class="execution-timeline__label">{{ stage.label }}</span>
+        @if (stage.detail) {
+          <span class="execution-timeline__detail">{{ stage.detail }}</span>
+        }
+      </div>
+    }
+  </div>
+}

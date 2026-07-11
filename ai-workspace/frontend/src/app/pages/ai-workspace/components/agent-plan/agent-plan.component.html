@@ -1,0 +1,27 @@
+@if (plan) {
+  <div class="agent-plan">
+    @if (plan.overallConfidence !== undefined) {
+      <div class="agent-plan__confidence">Confidence: {{ (plan.overallConfidence * 100).toFixed(0) }}%</div>
+    }
+    @for (step of plan.steps; track step.id) {
+      <div class="agent-plan__step" [class]="'agent-plan__step--' + step.status">
+        <span class="agent-plan__order">{{ step.order }}</span>
+        <div class="agent-plan__body">
+          <p class="agent-plan__description">{{ step.description }}</p>
+          @if (step.affectedFiles.length) {
+            <div class="agent-plan__files">
+              @for (file of step.affectedFiles; track file) {
+                <span class="agent-plan__file">{{ file }}</span>
+              }
+            </div>
+          }
+          @for (toolCall of step.toolCalls; track toolCall.toolName) {
+            <div class="agent-plan__tool-call">
+              <i class="pi pi-wrench"></i> {{ toolCall.toolName }}
+            </div>
+          }
+        </div>
+      </div>
+    }
+  </div>
+}

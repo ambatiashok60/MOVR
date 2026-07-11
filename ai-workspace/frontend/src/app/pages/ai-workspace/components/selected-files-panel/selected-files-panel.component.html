@@ -1,0 +1,14 @@
+<div class="selected-files-panel">
+  @for (file of files; track file.path) {
+    <div class="selected-files-panel__row">
+      <i [class]="file.path | fileIcon"></i>
+      <span class="selected-files-panel__path">{{ file.path }}</span>
+      @if (file.isPriority) {
+        <span class="selected-files-panel__priority">Priority</span>
+      }
+      <p-button icon="pi pi-times" [text]="true" size="small" (onClick)="removeFile.emit(file.path)" />
+    </div>
+  } @empty {
+    <span class="selected-files-panel__empty">No files selected yet.</span>
+  }
+</div>

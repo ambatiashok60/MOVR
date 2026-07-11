@@ -1,0 +1,5 @@
+<div class="conversation">
+  @for (message of messages; track message.id) {
+    <app-message-bubble [message]="message" />
+  }
+</div>

@@ -1,0 +1,20 @@
+<div class="file-change-card" [class.file-change-card--selected]="selected" (click)="select.emit()">
+  <i [class]="file.filePath | fileIcon"></i>
+  <span class="file-change-card__path">{{ file.filePath }}</span>
+  <span class="file-change-card__stat file-change-card__stat--add">+{{ file.additions }}</span>
+  <span class="file-change-card__stat file-change-card__stat--del">-{{ file.deletions }}</span>
+
+  <p-button
+    label="Keep"
+    size="small"
+    [outlined]="file.decision !== 'kept'"
+    (onClick)="decisionChange.emit('kept'); $event.stopPropagation()"
+  />
+  <p-button
+    label="Reject"
+    size="small"
+    severity="danger"
+    [outlined]="file.decision !== 'rejected'"
+    (onClick)="decisionChange.emit('rejected'); $event.stopPropagation()"
+  />
+</div>

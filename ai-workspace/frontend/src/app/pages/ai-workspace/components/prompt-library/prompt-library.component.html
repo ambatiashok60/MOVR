@@ -1,0 +1,12 @@
+<div class="prompt-library">
+  @for (prompt of prompts; track prompt.id) {
+    <button type="button" class="prompt-library__item" (click)="select.emit(prompt)">
+      <span class="prompt-library__title">{{ prompt.title }}</span>
+      @if (prompt.description) {
+        <span class="prompt-library__description">{{ prompt.description }}</span>
+      }
+    </button>
+  } @empty {
+    <span class="prompt-library__empty">No saved prompts yet.</span>
+  }
+</div>

@@ -1,0 +1,10 @@
+<div class="workspace-header">
+  <h1 class="workspace-header__title">{{ workspaceName || 'AI Workspace' }}</h1>
+  <span class="workspace-header__mode">{{ mode === 'ask' ? 'Ask Mode' : 'Agent Mode' }}</span>
+  @if (modelName) {
+    <span class="workspace-header__model">{{ modelName }}</span>
+  }
+  @if (syncedAt) {
+    <span class="workspace-header__sync"><i class="pi pi-check-circle"></i> Synced {{ syncedAt }}</span>
+  }
+</div>

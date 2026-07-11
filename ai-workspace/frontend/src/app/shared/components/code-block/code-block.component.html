@@ -1,0 +1,21 @@
+<div class="code-block" [class.code-block--fullscreen]="isFullscreen()">
+  <div class="code-block__toolbar">
+    <span class="code-block__language">{{ language || 'text' }}</span>
+    <div class="code-block__actions">
+      <p-button
+        [icon]="copied() ? 'pi pi-check' : 'pi pi-copy'"
+        [text]="true"
+        size="small"
+        (onClick)="copy()"
+      />
+      <p-button icon="pi pi-download" [text]="true" size="small" (onClick)="download()" />
+      <p-button
+        [icon]="isFullscreen() ? 'pi pi-window-minimize' : 'pi pi-window-maximize'"
+        [text]="true"
+        size="small"
+        (onClick)="toggleFullscreen()"
+      />
+    </div>
+  </div>
+  <pre class="code-block__content"><code>{{ code }}</code></pre>
+</div>

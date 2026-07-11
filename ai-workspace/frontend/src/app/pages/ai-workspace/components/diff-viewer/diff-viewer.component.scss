@@ -1,0 +1,45 @@
+.diff-viewer {
+  flex: 1;
+  overflow: auto;
+  font-family: monospace;
+  font-size: 0.8rem;
+  border: 1px solid var(--surface-border, #e5e7eb);
+  border-radius: 6px;
+
+  &__hunk-header {
+    padding: 0.35rem 0.6rem;
+    background: var(--primary-50, #eef2ff);
+    color: var(--primary-color, #6366f1);
+  }
+
+  &__line {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0 0.6rem;
+
+    &--added {
+      background: var(--green-50, #f0fdf4);
+    }
+
+    &--removed {
+      background: var(--red-50, #fef2f2);
+    }
+  }
+
+  &__line-no {
+    width: 2rem;
+    flex-shrink: 0;
+    color: var(--text-color-secondary, #cbd5e1);
+    text-align: right;
+  }
+
+  &__line-content {
+    white-space: pre;
+  }
+
+  &__empty {
+    padding: 1rem;
+    color: var(--text-color-secondary, #94a3b8);
+    font-size: 0.85rem;
+  }
+}
