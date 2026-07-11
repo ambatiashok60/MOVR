@@ -1,0 +1,10 @@
+<section class="mock-plan" [class.high-risk]="plan.risk_level === 'high'">
+  <header><div><h3>Mocks &amp; infrastructure plan</h3><span class="risk">{{ plan.risk_level }} risk</span></div></header>
+  <p *ngIf="plan.auth_strategy"><strong>Authentication:</strong> {{ plan.auth_strategy }}</p>
+  <div *ngIf="plan.dependencies_to_mock.length"><strong>Dependencies</strong><ul><li *ngFor="let item of plan.dependencies_to_mock">{{ item.name }} — {{ item.reason }}</li></ul></div>
+  <div *ngIf="plan.provisioning_actions.length"><strong>Isolated provisioning plan</strong><ul><li *ngFor="let item of plan.provisioning_actions">{{ item }}</li></ul></div>
+  <div *ngIf="plan.approval_reasons.length"><strong>Why approval is required</strong><ul><li *ngFor="let item of plan.approval_reasons">{{ item }}</li></ul></div>
+  <button *ngIf="plan.approval_required" type="button" [disabled]="approving" (click)="approve.emit()">
+    {{ approving ? 'Continuing…' : 'Approve isolated mocks and continue' }}
+  </button>
+</section>

@@ -44,6 +44,12 @@ export interface MockStubPlan {
   generated_stubs: string[];
   external_services_to_stub: string[];
   warnings: string[];
+  risk_level: string;
+  approval_required: boolean;
+  approval_reasons: string[];
+  runtime_signals: string[];
+  provisioning_actions: string[];
+  auth_strategy?: string | null;
 }
 
 export interface GeneratedFile {
@@ -58,6 +64,21 @@ export interface ValidationResult {
   command?: string | null;
   summary: string;
   details: string[];
+}
+
+export interface GenerationBudgetReport {
+  enforcement_mode: 'review' | 'strict' | string;
+  review_required: boolean;
+  exceeded_thresholds: string[];
+  usage: {
+    llm_calls: number;
+    tool_calls: number;
+    repository_reads: number;
+    repair_attempts: number;
+    prompt_chars: number;
+    completion_chars: number;
+    elapsed_seconds: number;
+  };
 }
 
 export interface GenerateApiTestCodeRequest {
@@ -76,6 +97,7 @@ export interface GenerateApiTestCodeRequest {
   branch?: string | null;
   run_validation: boolean;
   additional_context?: string | null;
+  approve_high_risk_mocks?: boolean;
 }
 
 export interface ApiTestGenerationResult {
@@ -92,6 +114,9 @@ export interface ApiTestGenerationResult {
   source_files_used: SourceSnippet[];
   mock_stub_plan?: MockStubPlan | null;
   warnings: string[];
+  needs_review?: boolean;
+  review_reasons?: string[];
+  budget?: GenerationBudgetReport | null;
 }
 
 export interface GenerationEvent {

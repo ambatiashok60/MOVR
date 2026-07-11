@@ -26,7 +26,9 @@
   <app-functional-test-gen *ngIf="activeTab === 'functional'"></app-functional-test-gen>
   <app-api-test-gen
     *ngIf="activeTab === 'api'"
-    [stories]="stories"
+    [selectedStory]="selectedStory"
     [tenantId]="tenantId"
+    [repoPath]="repoPath"
+    [branch]="branch"
   ></app-api-test-gen>
 </section>
