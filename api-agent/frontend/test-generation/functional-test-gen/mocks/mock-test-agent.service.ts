@@ -17,6 +17,6 @@ export class MockTestAgentService extends TestAgentService {
   }
 
   override generateCode(payload: GenerateFunctionalCodeRequest): Observable<FunctionalGenerationResult> {
-    return of({ testCaseId: payload.test_case_id, status: 'completed', filesChanged: ['e2e/soh-records.spec.ts'], diffSummary: `Added Playwright coverage for ${payload.test_case_id}`, validation: { syntax: 'passed', execution: 'notRun' }, needsReview: false }).pipe(delay(700));
+    return of<FunctionalGenerationResult>({ testCaseId: payload.test_case_id, status: 'completed', filesChanged: ['e2e/soh-records.spec.ts'], diffSummary: `Added Playwright coverage for ${payload.test_case_id}`, validation: { syntax: 'passed', execution: 'notRun' }, needsReview: false }).pipe(delay(700));
   }
 }
