@@ -23,7 +23,7 @@ class RepairingClient(DefaultLLMClientAdapter):
     def __init__(self, responses: list[str]) -> None:
         self.responses = responses
 
-    def complete(self, prompt: str) -> str:
+    def complete(self, prompt: str, system_prompt: str | None = None) -> str:
         return self.responses.pop(0)
 
 

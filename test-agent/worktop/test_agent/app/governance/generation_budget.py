@@ -128,16 +128,27 @@ class BudgetedLLMClient:
         self._inner = inner
         self._budget = budget
 
-    def complete(self, prompt: str) -> str:
+    def complete(self, prompt: str, system_prompt: str | None = None) -> str:
         self._budget.charge_llm_call(prompt_chars=len(prompt))
-        result = self._inner.complete(prompt)  # type: ignore[attr-defined]
+        # Forward system_prompt only when supplied so inner clients that predate
+        # the parameter (older adapters, test doubles) keep working.
+        extra = {"system_prompt": system_prompt} if system_prompt is not None else {}
+        result = self._inner.complete(prompt, **extra)  # type: ignore[attr-defined]
         self._budget.usage.completion_chars += len(result or "")
         return result
 
-    def complete_structured(self, prompt: str, response_model: type) -> object:
+    def complete_structured(
+        self,
+        prompt: str,
+        response_model: type,
+        system_prompt: str | None = None,
+    ) -> object:
         self._budget.charge_llm_call(prompt_chars=len(prompt))
+        extra = {"system_prompt": system_prompt} if system_prompt is not None else {}
         return self._inner.complete_structured(  # type: ignore[attr-defined]
-            prompt=prompt, response_model=response_model
+            prompt=prompt,
+            response_model=response_model,
+            **extra,
         )
 
     def charge_tool_call(self) -> None:
