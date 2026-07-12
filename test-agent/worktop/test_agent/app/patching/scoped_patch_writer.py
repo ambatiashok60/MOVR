@@ -3,19 +3,19 @@ from __future__ import annotations
 from pathlib import Path
 
 
-from worktop.test_agent.app.patching.backup_manager import BackupManager
 from worktop.test_agent.app.patching.diff_generator import DiffGenerator
 from worktop.test_agent.app.patching.patch_planner import PatchPlanner
 from worktop.test_agent.app.schemas.code_patch import AppliedPatch, PatchSet, PatchWriteResult
+from worktop.test_agent.app.tools.playwright_parser_tool import PlaywrightParserTool
 from worktop.core_services.app.utility.custom_logger.logging import logger
 
 
 
 class ScopedPatchWriter:
     def __init__(self) -> None:
-        self.backups = BackupManager()
         self.diffs = DiffGenerator()
         self.planner = PatchPlanner()
+        self.playwright_parser = PlaywrightParserTool()
 
     def apply(self, repo_path: str, patches: PatchSet) -> PatchWriteResult:
         logger.info(
@@ -36,16 +36,16 @@ class ScopedPatchWriter:
                 )
                 path = self._resolve_safe_path(repo_path, patch.path)
                 path.parent.mkdir(parents=True, exist_ok=True)
-                before = path.read_text(encoding="utf-8") if path.exists() else ""
+                existed_before = path.exists()
+                before = path.read_text(encoding="utf-8") if existed_before else ""
                 after = self._apply_content(before, patch)
-                backup_path = self.backups.backup(path)
                 path.write_text(after, encoding="utf-8")
                 result.applied.append(
                     AppliedPatch(
                         path=patch.path,
                         operation=patch.operation,
                         diff=self.diffs.unified(before, after, patch.path),
-                        backup_path=str(backup_path) if backup_path else None,
+                        original_content=before if existed_before else None,
                     )
                 )
             logger.info(
@@ -66,16 +66,13 @@ class ScopedPatchWriter:
             repo_path,
             len(result.applied),
         )
-        root = Path(repo_path).resolve()
         for applied in reversed(result.applied):
             path = self._resolve_safe_path(repo_path, applied.path)
-            backup_path = Path(applied.backup_path).resolve() if applied.backup_path else None
-            if backup_path and backup_path.exists() and root in backup_path.parents:
-                path.write_text(backup_path.read_text(encoding="utf-8"), encoding="utf-8")
+            if applied.original_content is not None:
+                path.write_text(applied.original_content, encoding="utf-8")
                 logger.info(
-                    "[playwright-generation] stage=patch_writer_rollback status=restored path=%s backup=%s",
+                    "[playwright-generation] stage=patch_writer_rollback status=restored path=%s",
                     applied.path,
-                    backup_path,
                 )
             elif applied.operation == "create" and path.exists():
                 path.unlink()
@@ -85,9 +82,8 @@ class ScopedPatchWriter:
                 )
             else:
                 logger.warning(
-                    "[playwright-generation] stage=patch_writer_rollback status=skipped path=%s backup=%s",
+                    "[playwright-generation] stage=patch_writer_rollback status=skipped path=%s",
                     applied.path,
-                    backup_path,
                 )
         logger.info("[playwright-generation] stage=patch_writer_rollback status=completed")
 
@@ -117,12 +113,39 @@ class ScopedPatchWriter:
             return "".join(lines[:start] + [content] + lines[end:])
 
         if patch.operation == "append":
-            insertion_index = len(lines)
-            if patch.start_line is not None:
-                insertion_index = min(max(patch.start_line - 1, 0), len(lines))
-            prefix = "" if not before or before.endswith("\n") else "\n"
-            if insertion_index == len(lines):
-                return f"{before}{prefix}{content}"
+            existing_tests = self.playwright_parser.extract_tests(patch.path, before)
+            generated_tests = self.playwright_parser.extract_tests(patch.path, content)
+            if len(generated_tests) != 1:
+                raise ValueError(
+                    f"Append patch must contain exactly one complete test block: {patch.path}"
+                )
+            existing_titles = {test.test_title for test in existing_tests}
+            duplicates = sorted(
+                test.test_title for test in generated_tests if test.test_title in existing_titles
+            )
+            if duplicates:
+                raise ValueError(
+                    f"Generated test title already exists in {patch.path}: {', '.join(duplicates)}"
+                )
+
+            describes = self.playwright_parser.extract_describes(patch.path, before)
+            if patch.start_line is None:
+                if len(describes) != 1:
+                    raise ValueError(
+                        f"Append patch requires start_line when {patch.path} does not contain exactly one describe block"
+                    )
+                insertion_index = describes[0].end_line - 1
+            else:
+                containing = [
+                    block
+                    for block in describes
+                    if block.start_line < patch.start_line <= block.end_line
+                ]
+                if not containing:
+                    raise ValueError(
+                        f"Append start_line must be inside a describe block: {patch.path}"
+                    )
+                insertion_index = max(containing, key=lambda block: block.start_line).end_line - 1
             return "".join(lines[:insertion_index] + [content] + lines[insertion_index:])
 
         raise ValueError(f"Unsupported patch operation: {patch.operation}")

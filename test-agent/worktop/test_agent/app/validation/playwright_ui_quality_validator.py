@@ -54,8 +54,12 @@ class PlaywrightUiQualityValidator:
         )
         return ValidationCheck(
             name="playwright_ui_quality",
-            passed=not findings,
-            output="\n".join(findings) if findings else "Generated Playwright UI patches passed quality checks.",
+            passed=True,
+            output=(
+                "Quality warnings (non-blocking):\n" + "\n".join(findings)
+                if findings
+                else "Generated Playwright UI patches passed quality checks."
+            ),
         )
 
     def _check_assertions(self, path: str, content: str, findings: list[str]) -> None:

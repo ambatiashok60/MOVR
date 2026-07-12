@@ -14,6 +14,9 @@ Rules:
 - Fix only generated patch scope.
 - Do not modify unrelated repository files.
 - Return structured patches only.
+- Repair parser, line-range, describe-placement, duplicate-title, and anchor-boundary failures in the patch instead of changing the intended scenario.
+- For extension repairs, preserve every existing step and assertion and keep the exact parser-validated target range.
+- For append repairs, keep the selected anchor flow uninterrupted, retain its boundary comments, and insert the complete test inside the selected describe block.
 
 Current patches:
 {as_json(patches)}

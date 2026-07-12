@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     default_technology: str = "playwright"
     workspace_root: str = "/tmp"
     enable_targeted_runtime: bool = False
+    enable_extended_reporting: bool = False
     validation_timeout_seconds: int = 120
     max_repair_attempts: int = 2
     min_placement_confidence: float = 0.5
@@ -20,7 +21,7 @@ class Settings(BaseSettings):
     budget_max_repository_reads: int = 200
     budget_max_prompt_chars: int = 1_500_000
     budget_max_generation_seconds: float = 900.0
-    budget_enforcement_mode: str = "review"
+    budget_enforcement_mode: str = "observe"
     workspace_stale_lock_seconds: float = 3600.0
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

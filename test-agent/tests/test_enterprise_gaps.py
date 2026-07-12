@@ -759,6 +759,21 @@ class TestGenerationBudget:
         assert report.usage.llm_calls == 2
         assert any("llm_calls used 2 of 1" in reason for reason in report.exceeded_thresholds)
 
+    def test_observe_mode_soft_passes_budget_overages(self) -> None:
+        budget = GenerationBudget(
+            limits=BudgetLimits(max_llm_calls=1, max_generation_seconds=0.0),
+            enforcement_mode="observe",
+        )
+
+        budget.charge_llm_call(prompt_chars=100)
+        budget.charge_llm_call(prompt_chars=200)
+        report = budget.report()
+
+        assert report.review_required is False
+        assert report.escalated is False
+        assert report.enforcement_mode == "observe"
+        assert report.exceeded_thresholds
+
 
 class TestWorkspaceIsolation:
     def test_second_job_on_same_repo_is_locked_out(self, tmp_path: Path) -> None:

@@ -22,12 +22,15 @@ def build_test_action_prompt(
 You are deciding whether to extend, append, or create Playwright coverage.
 
 Rules:
-- Same flow plus missing coverage means extend existing test.
-- Same module but different scenario means append a new test.
+- Prefer extending an existing test when the request continues the same user journey, setup, state transition, and expected outcome, provided every proven existing step and assertion can be preserved.
+- Append only when the request is a genuinely separate scenario, branch, role, data condition, or outcome that should run and report independently.
+- Do not append merely because an extension requires careful parsing or patch placement; those are repairable implementation issues.
+- Avoid suite bloat: if a new test would mostly duplicate an existing test's flow, extend the existing test instead.
 - Different owner means create a new spec.
 - Preserve proven execution flow; do not randomly insert lines.
 - Reuse existing auth/session, fixture, mock/stub, and page-object patterns.
 - Avoid duplicate coverage when an existing spec already proves the same visible behavior.
+- Choose extend_existing_test only after reading the exact candidate block and confirming its title and source range. Include that evidence in the decision trace.
 
 Spec placement:
 {as_json(placement)}

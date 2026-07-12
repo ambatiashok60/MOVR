@@ -53,9 +53,14 @@ Rules:
 - Do not extend any other test block or overwrite the whole spec file.
 - When a Flow merge plan is provided, keep its stable_region and preserved_steps intact and only add its extension_region and added_steps.
 - When an Ownership resolution is provided, place new locators, helpers, and methods in the resolved owner (owner_path/owner_kind); only inline them in the spec when the owner_kind is spec.
-- If Test action is append_new_test and an Anchor flow context is provided, reuse that sibling test's setup, auth/session, navigation, fixtures, and page objects verbatim as the base of the new test.
+- If Test action is append_new_test and an Anchor flow context is provided, copy that sibling test's setup, auth/session, navigation, fixtures, and page-object calls verbatim as one uninterrupted base-flow block.
+- Treat the Anchor flow context behavior_summary and source_excerpt as the proven partial flow. Preserve its required setup and steps, then add only the requested new branch and assertions.
+- Do not omit, reorder, rewrite, or insert new steps between statements copied from the anchor flow. Add the new scenario steps only after the preserved base-flow block reaches the required state.
+- In the new test, add `// Anchor flow: <anchor test title>` immediately before the copied anchor statements and `// End anchor flow; new scenario steps begin below.` immediately after them. These comments document which test was reused and the exact extent of reuse.
 - For append_new_test, add only the steps and assertions the requested behavior needs on top of the anchor flow; do not reinvent a parallel setup or drop the anchor's proven setup.
-- For append_new_test, the anchor is a reference only: never edit, replace, or duplicate the anchor test itself.
+- For append_new_test, never edit or replace the original anchor test. The new test may copy its proven inner flow, but must use a unique title and add the requested behavior afterward.
+- For append_new_test, emit the complete test block and set start_line inside the intended describe block. If the target has exactly one describe block, start_line may be null and deterministic insertion will use that block.
+- The generated test title must be unique within the target file.
 - If Test action is create_new_spec and an Anchor flow context is provided, mirror its setup, auth/session, fixture, and page-object style in the new spec; do not copy its test titles or assertions.
 - When Locator decisions are provided, use exactly those locators for the matching interactions; do not substitute or invent alternatives that lack source evidence.
 - Never call a page-object method, helper, or fixture that does not already exist in the repository or in a patch you are emitting in this same patch set.

@@ -44,7 +44,7 @@ class RepoCommandValidator:
         try:
             checks = [
                 self.syntax.validate(repo_path),
-                self.playwright.validate(repo_path),
+                self.playwright.validate(repo_path, patches),
                 self.ui_quality.validate(patches, ui_context),
                 self._ci_command_check(patches, ui_context),
             ]

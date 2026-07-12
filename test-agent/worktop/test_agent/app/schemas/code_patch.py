@@ -25,6 +25,7 @@ class AppliedPatch(BaseModel):
     operation: PatchOperation
     diff: str
     backup_path: str | None = None
+    original_content: str | None = None
 
 
 class PatchWriteResult(BaseModel):

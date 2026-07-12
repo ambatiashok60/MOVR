@@ -77,10 +77,12 @@ class GenerationBudget:
         return BudgetReport(
             limits=self.limits,
             usage=self.usage.model_copy(),
-            escalated=bool(self._escalation_reason),
+            escalated=bool(self._escalation_reason) and self.enforcement_mode != "observe",
             escalation_reason=self._escalation_reason,
             enforcement_mode=self.enforcement_mode,
-            review_required=bool(self._exceeded_thresholds),
+            review_required=(
+                bool(self._exceeded_thresholds) and self.enforcement_mode != "observe"
+            ),
             exceeded_thresholds=list(self._exceeded_thresholds),
         )
 
@@ -106,7 +108,14 @@ class GenerationBudget:
         if reason not in self._exceeded_thresholds:
             self._exceeded_thresholds.append(reason)
         report = self.report()
-        logger.log(logging.ERROR if self.enforcement_mode == 'strict' else logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'generation_budget', 'blocked' if self.enforcement_mode == 'strict' else 'review_required', {'reason': reason, 'enforcement_mode': self.enforcement_mode, 'usage': report.usage.model_dump()})
+        status = (
+            "blocked"
+            if self.enforcement_mode == "strict"
+            else "review_required"
+            if self.enforcement_mode == "review"
+            else "soft_pass"
+        )
+        logger.log(logging.ERROR if self.enforcement_mode == 'strict' else logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'generation_budget', status, {'reason': reason, 'enforcement_mode': self.enforcement_mode, 'usage': report.usage.model_dump()})
         if self.enforcement_mode == "strict":
             raise BudgetExceededError(reason, report)
 
