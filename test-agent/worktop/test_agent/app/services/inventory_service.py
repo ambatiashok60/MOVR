@@ -5,9 +5,8 @@ from __future__ import annotations
 from worktop.test_agent.app.inventory.inventory_builder import InventoryBuilder
 from worktop.test_agent.app.schemas.repository_inventory import RepositoryInventory
 from worktop.test_agent.app.schemas.test_file_classification import TestFileClassification
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 
 class InventoryService:

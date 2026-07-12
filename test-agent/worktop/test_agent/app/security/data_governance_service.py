@@ -7,10 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from worktop.test_agent.app.logging_config import log_event
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 FileClassification = Literal["safe", "internal", "sensitive", "restricted"]
 
@@ -100,27 +98,12 @@ class DataGovernanceService:
         """
         if self.is_blocked(path):
             self.audit.files_blocked.append(path)
-            log_event(
-                logger,
-                logging.WARNING,
-                "data_governance",
-                "file_blocked",
-                path=path,
-                classification="restricted",
-            )
+            logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'data_governance', 'file_blocked', {'path': path, 'classification': 'restricted'})
             return None
         result = self.redact(content)
         self.audit.files_sent.append(path)
         self.audit.chars_sent += len(result.content)
         self.audit.redactions += result.redactions
         if result.redactions:
-            log_event(
-                logger,
-                logging.WARNING,
-                "data_governance",
-                "content_redacted",
-                path=path,
-                classification=self.classify(path),
-                redactions=result.redactions,
-            )
+            logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'data_governance', 'content_redacted', {'path': path, 'classification': self.classify(path), 'redactions': result.redactions})
         return result.content

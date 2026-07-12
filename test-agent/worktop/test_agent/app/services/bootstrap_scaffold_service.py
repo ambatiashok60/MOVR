@@ -5,9 +5,8 @@ from pathlib import Path
 
 from worktop.test_agent.app.schemas.code_patch import CodePatch, PatchSet
 from worktop.test_agent.app.schemas.repo_profile import RepoProfile
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 PLAYWRIGHT_DEV_DEPENDENCY = "^1.50.0"
 

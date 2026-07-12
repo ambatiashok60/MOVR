@@ -3,15 +3,13 @@ from __future__ import annotations
 import logging
 import re
 
-from worktop.test_agent.app.logging_config import log_event
 from worktop.test_agent.app.schemas.behavioral_test_unit import BehavioralTestUnit
 from worktop.test_agent.app.schemas.code_patch import PatchSet
 from worktop.test_agent.app.schemas.functional_intent import FunctionalIntent
 from worktop.test_agent.app.schemas.generation_request import GenerationRequest
 from worktop.test_agent.app.schemas.traceability import RequirementTrace, TraceabilityMatrix
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 _STOPWORDS = {
     "the", "and", "with", "that", "this", "then", "for", "from", "into",
@@ -80,16 +78,7 @@ class TraceabilityService:
                 for trace in traces
             ],
         )
-        log_event(
-            logger,
-            logging.WARNING if missing else logging.INFO,
-            "requirement_traceability",
-            "incomplete" if missing else "complete",
-            requirements=len(traces),
-            generated=generated_count,
-            reused=reused_count,
-            missing=len(missing),
-        )
+        logger.log(logging.WARNING if missing else logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'requirement_traceability', 'incomplete' if missing else 'complete', {'requirements': len(traces), 'generated': generated_count, 'reused': reused_count, 'missing': len(missing)})
         return matrix
 
     def review_reasons(self, matrix: TraceabilityMatrix) -> list[str]:

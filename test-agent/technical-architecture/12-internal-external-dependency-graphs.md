@@ -72,7 +72,9 @@ specialized service
  -> llm/llm_client.py
  -> llm/llm_client_factory.py
  -> llm/default_llm_client.py
- -> Worktop DefaultLLMClient
+ -> Worktop CommonUtils + ModelsConfigurationDAO
+ -> Worktop ModelClientFactory
+ -> provider client
 ```
 
 Agents may consume schemas/inventory evidence and produce structured decisions. They must not write repository
@@ -105,7 +107,8 @@ candidate patch
 | FastAPI | runtime framework | routes/application bootstrap | host router mounting |
 | Pydantic/settings | contract/config | schemas and configuration | not replaced; version aligned |
 | Worktop DB/tenant dependencies | platform runtime | model/repository authorization | injected host providers |
-| Worktop `DefaultLLMClient` | external model gateway | LLM adapter/factory | `LLMClient` interface |
+| Worktop `CommonUtils` and `ModelsConfigurationDAO` | external model configuration | LLM adapter/factory | explicit configuration loaders |
+| Worktop `ModelClientFactory` | external provider-client factory | LLM adapter/factory | `LLMClient` interface |
 | Git/repository filesystem | external system | inventory, workspace, patching | workspace/repository provider |
 | Node/TypeScript parser environment | tooling | TS/Angular/Playwright parsing | parser adapter |
 | Playwright and repository package manager | target repository | validation/execution | command resolver/adapter |

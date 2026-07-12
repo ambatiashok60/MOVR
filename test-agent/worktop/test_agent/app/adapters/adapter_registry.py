@@ -4,10 +4,8 @@ import logging
 
 from worktop.test_agent.app.adapters.playwright_adapter import PlaywrightAdapter
 from worktop.test_agent.app.adapters.technology_adapter import TechnologyAdapter
-from worktop.test_agent.app.logging_config import log_event
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 
 class UnknownTechnologyError(ValueError):
@@ -29,14 +27,7 @@ class AdapterRegistry:
 
     def register(self, adapter: TechnologyAdapter) -> None:
         self._adapters[adapter.technology] = adapter
-        log_event(
-            logger,
-            logging.INFO,
-            "adapter_registry",
-            "registered",
-            technology=adapter.technology,
-            adapter=type(adapter).__name__,
-        )
+        logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'adapter_registry', 'registered', {'technology': adapter.technology, 'adapter': type(adapter).__name__})
 
     def resolve(self, technology: str) -> TechnologyAdapter:
         adapter = self._adapters.get(technology)

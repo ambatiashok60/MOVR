@@ -4,9 +4,8 @@ from typing import Any
 
 from worktop.test_agent.app.llm.default_llm_client import DefaultLLMClientAdapter
 from worktop.test_agent.app.llm.llm_client import LLMClient
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 
 class LLMClientFactory:

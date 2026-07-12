@@ -4,7 +4,6 @@ import logging
 import re
 from typing import Any
 
-from worktop.test_agent.app.logging_config import log_event
 from worktop.test_agent.app.schemas.behavioral_test_unit import AnchorFlowContext, ExistingTestContext
 from worktop.test_agent.app.schemas.code_patch import PatchSet, PatchWriteResult
 from worktop.test_agent.app.schemas.coverage import CoveragePreservationReport
@@ -13,9 +12,8 @@ from worktop.test_agent.app.schemas.review_report import ReviewFileChange, Revie
 from worktop.test_agent.app.schemas.test_value import TestValueReport
 from worktop.test_agent.app.schemas.traceability import TraceabilityMatrix
 from worktop.test_agent.app.schemas.validation_result import ValidationResult
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 _SPEC_SUFFIXES = (".spec.ts", ".spec.tsx", ".e2e.ts", ".e2e.tsx", ".pw.ts", ".playwright.ts")
 _METHOD_DECLARATION_PATTERN = re.compile(
@@ -72,14 +70,7 @@ class ReviewReportService:
             remaining_risks=risks,
         )
         report.markdown = self._render_markdown(report, test_value, traceability, coverage)
-        log_event(
-            logger,
-            logging.INFO,
-            "review_report",
-            "built",
-            files=len(report.files_changed),
-            risks=len(report.remaining_risks),
-        )
+        logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'review_report', 'built', {'files': len(report.files_changed), 'risks': len(report.remaining_risks)})
         return report
 
     def _summary(

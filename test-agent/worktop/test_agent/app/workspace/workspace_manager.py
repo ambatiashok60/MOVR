@@ -10,11 +10,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from worktop.test_agent.app.config import settings
-from worktop.test_agent.app.logging_config import log_event
 from worktop.test_agent.app.schemas.code_patch import PatchSet, PatchWriteResult
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 
 class WorkspaceLockedError(RuntimeError):
@@ -68,15 +66,7 @@ class WorkspaceManager:
             snapshot_dir=snapshot_dir,
             lock_file=lock_file,
         )
-        log_event(
-            logger,
-            logging.INFO,
-            "workspace",
-            "acquired",
-            job_id=job_id,
-            repo=repo_path,
-            workspace=str(workspace_dir),
-        )
+        logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'workspace', 'acquired', {'job_id': job_id, 'repo': repo_path, 'workspace': str(workspace_dir)})
         return workspace
 
     def release(self, workspace: JobWorkspace) -> None:
@@ -84,23 +74,9 @@ class WorkspaceManager:
             holder = self._read_lock(workspace.lock_file)
             if holder.get("job_id") == workspace.job_id:
                 workspace.lock_file.unlink(missing_ok=True)
-                log_event(
-                    logger,
-                    logging.INFO,
-                    "workspace",
-                    "released",
-                    job_id=workspace.job_id,
-                    repo=workspace.repo_path,
-                )
+                logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'workspace', 'released', {'job_id': workspace.job_id, 'repo': workspace.repo_path})
         except OSError as exc:
-            log_event(
-                logger,
-                logging.WARNING,
-                "workspace",
-                "release_failed",
-                job_id=workspace.job_id,
-                error=exc,
-            )
+            logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'workspace', 'release_failed', {'job_id': workspace.job_id, 'error': exc})
 
     def snapshot_targets(self, workspace: JobWorkspace, patches: PatchSet) -> None:
         """Copy the pre-patch content of every target file into the workspace."""
@@ -163,14 +139,7 @@ class WorkspaceManager:
                 holder = self._read_lock(lock_file)
                 acquired = float(holder.get("acquired_monotonic", 0) or 0)
                 if acquired and time.time() - acquired > self.stale_lock_seconds:
-                    log_event(
-                        logger,
-                        logging.WARNING,
-                        "workspace",
-                        "stale_lock_reclaimed",
-                        job_id=job_id,
-                        stale_holder=holder.get("job_id", "unknown"),
-                    )
+                    logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'workspace', 'stale_lock_reclaimed', {'job_id': job_id, 'stale_holder': holder.get('job_id', 'unknown')})
                     lock_file.unlink(missing_ok=True)
                     continue
                 raise WorkspaceLockedError(repo_path, holder) from None

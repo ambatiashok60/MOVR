@@ -12,9 +12,8 @@ from worktop.test_agent.app.schemas.ownership_resolution import OwnershipResolut
 from worktop.test_agent.app.schemas.playwright_ui_context import PlaywrightUiContext
 from worktop.test_agent.app.schemas.spec_placement import SpecPlacementDecision
 from worktop.test_agent.app.schemas.test_action_decision import TestActionDecision
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 
 class CodeGenerationService:

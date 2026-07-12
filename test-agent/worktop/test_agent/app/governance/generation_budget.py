@@ -4,11 +4,9 @@ import logging
 from time import perf_counter
 
 from worktop.test_agent.app.config import settings
-from worktop.test_agent.app.logging_config import log_event
 from worktop.test_agent.app.schemas.generation_budget import BudgetLimits, BudgetReport, BudgetUsage
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 
 class BudgetExceededError(RuntimeError):
@@ -108,15 +106,7 @@ class GenerationBudget:
         if reason not in self._exceeded_thresholds:
             self._exceeded_thresholds.append(reason)
         report = self.report()
-        log_event(
-            logger,
-            logging.ERROR if self.enforcement_mode == "strict" else logging.WARNING,
-            "generation_budget",
-            "blocked" if self.enforcement_mode == "strict" else "review_required",
-            reason=reason,
-            enforcement_mode=self.enforcement_mode,
-            usage=report.usage.model_dump(),
-        )
+        logger.log(logging.ERROR if self.enforcement_mode == 'strict' else logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'generation_budget', 'blocked' if self.enforcement_mode == 'strict' else 'review_required', {'reason': reason, 'enforcement_mode': self.enforcement_mode, 'usage': report.usage.model_dump()})
         if self.enforcement_mode == "strict":
             raise BudgetExceededError(reason, report)
 
@@ -128,16 +118,27 @@ class BudgetedLLMClient:
         self._inner = inner
         self._budget = budget
 
-    def complete(self, prompt: str) -> str:
+    def complete(self, prompt: str, system_prompt: str | None = None) -> str:
         self._budget.charge_llm_call(prompt_chars=len(prompt))
-        result = self._inner.complete(prompt)  # type: ignore[attr-defined]
+        # Forward system_prompt only when supplied so inner clients that predate
+        # the parameter (older adapters, test doubles) keep working.
+        extra = {"system_prompt": system_prompt} if system_prompt is not None else {}
+        result = self._inner.complete(prompt, **extra)  # type: ignore[attr-defined]
         self._budget.usage.completion_chars += len(result or "")
         return result
 
-    def complete_structured(self, prompt: str, response_model: type) -> object:
+    def complete_structured(
+        self,
+        prompt: str,
+        response_model: type,
+        system_prompt: str | None = None,
+    ) -> object:
         self._budget.charge_llm_call(prompt_chars=len(prompt))
+        extra = {"system_prompt": system_prompt} if system_prompt is not None else {}
         return self._inner.complete_structured(  # type: ignore[attr-defined]
-            prompt=prompt, response_model=response_model
+            prompt=prompt,
+            response_model=response_model,
+            **extra,
         )
 
     def charge_tool_call(self) -> None:

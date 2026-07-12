@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from worktop.test_agent.app.schemas.repo_profile import RepoProfile
 from worktop.test_agent.app.schemas.technology_profile import TechnologyProfile
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 
 class TechnologyIntelligenceService:

@@ -8,9 +8,8 @@ from worktop.test_agent.app.schemas.functional_intent import FunctionalIntent
 from worktop.test_agent.app.schemas.ownership_resolution import OwnershipResolution
 from worktop.test_agent.app.schemas.repository_inventory import RepositoryInventory
 from worktop.test_agent.app.schemas.source_intelligence import SourceIntelligence
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 
 class OwnershipResolutionService:

@@ -16,11 +16,9 @@ except ImportError:
     TelemetrySubFeature = None
     _TELEMETRY_AVAILABLE = False
 
-from worktop.test_agent.app.utils.logging_utils import build_log_context
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
 ResponseModel = TypeVar("ResponseModel")
-logger = get_logger(__name__)
 
 __all__ = ["BaseAgent", "logger"]
 
@@ -32,7 +30,15 @@ class BaseAgent:
         self.llm = llm_client
 
     def log_start(self, stage: str, **metadata: Any) -> dict[str, Any]:
-        context = build_log_context(stage=stage, agent_name=self.agent_name, **metadata)
+        context = {
+            key: value
+            for key, value in {
+                "stage": stage,
+                "agent_name": self.agent_name,
+                **metadata,
+            }.items()
+            if value is not None
+        }
         logger.info(
             "[playwright-generation] agent=%s stage=%s status=started context=%s",
             self.agent_name,

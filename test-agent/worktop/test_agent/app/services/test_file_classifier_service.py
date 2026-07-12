@@ -4,9 +4,8 @@ from pathlib import Path
 
 
 from worktop.test_agent.app.schemas.test_file_classification import TestFileClassification
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 
 class TestFileClassifierService:

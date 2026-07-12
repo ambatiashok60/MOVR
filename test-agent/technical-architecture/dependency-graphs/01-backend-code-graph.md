@@ -55,6 +55,9 @@ flowchart TD
   BASE[BaseAgent]
   LLM[DefaultLLMClientAdapter]
   DAO[(Worktop model config)]
+  MCF[Worktop ModelClientFactory]
+  PC[Provider client]
+  WLOG[Worktop custom logger]
 
   main -->|mounts| rGen & rJob & rEvt
   rGen -->|CALLS generate| ORCH
@@ -70,6 +73,9 @@ flowchart TD
   BASE -->|CALLS| LLM
   RT -->|CONSTRUCTS| LLM
   LLM -->|PERSISTS_TO/reads| DAO
+  LLM -->|CALLS get_client| MCF -->|CREATES| PC
+  LLM -->|CALLS prepare_input + generate_completion| PC
+  main & rGen & rJob & rEvt & ORCH & BASE & LLM -->|IMPORTS logger| WLOG
 ```
 
 ## Typed edges — API & runtime
@@ -124,8 +130,12 @@ flowchart TD
 
 | From | Edge | To |
 |---|---|---|
-| `DefaultLLMClientAdapter` | PERSISTS_TO (read) | Worktop model config by `tenant_id` — **only DB access** |
-| all modules | DEPENDS_ON | `logging_config` → Worktop custom logger |
+| `DefaultLLMClientAdapter` | PERSISTS_TO (read) | Worktop model parameters and tenant config by `tenant_id` — **only DB access** |
+| `DefaultLLMClientAdapter` | CALLS | `ModelClientFactory.get_client(provider, config, params, db, tenant_id)` |
+| all logging modules | DEPENDS_ON | Worktop custom logger directly |
+
+Application modules import the Worktop custom logger directly. Worktop owns its
+configuration and output sinks; standalone tests supply a test-only stub.
 
 No `ENTITY`/`TABLE` nodes. Generated specs are written to the workspace on disk
 via `patching/scoped_patch_writer` (+ `backup_manager`), not a database.
@@ -143,6 +153,6 @@ via `patching/scoped_patch_writer` (+ `backup_manager`), not a database.
 ```text
 api → services/generation_orchestrator → agents → prompts + tools + patching + validation + inventory + adapters
 services → schemas (DTOs, decision_trace, exploration)
-agents → llm (DefaultLLMClientAdapter) → EXTERNAL worktop
-all → logging_config, config, errors
+agents → llm (DefaultLLMClientAdapter) → EXTERNAL Worktop config + ModelClientFactory → provider client
+all → Worktop custom logger, config, errors
 ```

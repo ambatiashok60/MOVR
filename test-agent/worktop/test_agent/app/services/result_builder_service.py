@@ -14,9 +14,8 @@ from worktop.test_agent.app.schemas.review_report import ReviewReport
 from worktop.test_agent.app.schemas.test_value import TestValueReport
 from worktop.test_agent.app.schemas.traceability import TraceabilityMatrix
 from worktop.test_agent.app.schemas.validation_result import ValidationResult
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 
 class ResultBuilderService:

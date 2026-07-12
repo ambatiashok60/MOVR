@@ -8,9 +8,8 @@ from worktop.test_agent.app.schemas.validation_result import ValidationCheck, Va
 from worktop.test_agent.app.validation.playwright_validator import PlaywrightValidator
 from worktop.test_agent.app.validation.playwright_ui_quality_validator import PlaywrightUiQualityValidator
 from worktop.test_agent.app.validation.syntax_validator import SyntaxValidator
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 
 class RepoCommandValidator:

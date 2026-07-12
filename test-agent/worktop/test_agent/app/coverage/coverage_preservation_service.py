@@ -4,7 +4,6 @@ import logging
 import re
 from pathlib import Path
 
-from worktop.test_agent.app.logging_config import log_event
 from worktop.test_agent.app.schemas.behavioral_test_unit import BehavioralTestUnit
 from worktop.test_agent.app.schemas.code_patch import PatchSet
 from worktop.test_agent.app.schemas.coverage import (
@@ -13,9 +12,8 @@ from worktop.test_agent.app.schemas.coverage import (
     CoveragePreservationReport,
 )
 from worktop.test_agent.app.tools.playwright_parser_tool import PlaywrightParserTool
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 _ASSERTION_PATTERN = re.compile(r"expect(?:\.soft)?\s*\(([^;]{0,160}?)\)\s*\.\s*(\w+)")
 _NAVIGATION_PATTERN = re.compile(r"\.goto\s*\(\s*['\"`]([^'\"`]+)['\"`]")
@@ -107,16 +105,7 @@ class CoveragePreservationService:
             coverage_preserved=not lost_behavior,
             summary=self._summarize(preserved, added, removed, modified),
         )
-        log_event(
-            logger,
-            logging.WARNING if lost_behavior else logging.INFO,
-            "coverage_preservation",
-            "coverage_lost" if lost_behavior else "coverage_preserved",
-            preserved=len(preserved),
-            added=len(added),
-            removed=len(removed),
-            modified=len(modified),
-        )
+        logger.log(logging.WARNING if lost_behavior else logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'coverage_preservation', 'coverage_lost' if lost_behavior else 'coverage_preserved', {'preserved': len(preserved), 'added': len(added), 'removed': len(removed), 'modified': len(modified)})
         return report
 
     def review_reasons(self, report: CoveragePreservationReport) -> list[str]:

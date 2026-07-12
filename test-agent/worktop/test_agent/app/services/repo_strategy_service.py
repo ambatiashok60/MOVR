@@ -6,15 +6,17 @@ from typing import Any
 
 
 from worktop.test_agent.app.schemas.repo_profile import RepoProfile
-from worktop.test_agent.app.utils.logging_utils import build_log_context
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 
 class RepoStrategyService:
     def detect(self, repo_path: str, branch: str | None = None) -> RepoProfile:
-        context = build_log_context(repo_path=repo_path, branch=branch, stage="repo_strategy")
+        context = {
+            "repo_path": repo_path,
+            "branch": branch,
+            "stage": "repo_strategy",
+        }
         logger.info(
             "[playwright-generation] stage=repo_strategy status=started repo=%s branch=%s",
             repo_path,

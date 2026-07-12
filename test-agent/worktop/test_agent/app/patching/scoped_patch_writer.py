@@ -7,9 +7,8 @@ from worktop.test_agent.app.patching.backup_manager import BackupManager
 from worktop.test_agent.app.patching.diff_generator import DiffGenerator
 from worktop.test_agent.app.patching.patch_planner import PatchPlanner
 from worktop.test_agent.app.schemas.code_patch import AppliedPatch, PatchSet, PatchWriteResult
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 
 class ScopedPatchWriter:

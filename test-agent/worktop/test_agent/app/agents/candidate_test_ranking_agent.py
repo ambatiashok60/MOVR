@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from worktop.test_agent.app.agents.base_agent import BaseAgent, logger
+from worktop.test_agent.app.agents.base_agent import BaseAgent
+from worktop.core_services.app.utility.custom_logger.logging import logger
 from worktop.test_agent.app.prompts.candidate_ranking_prompt import build_candidate_ranking_prompt
 from worktop.test_agent.app.schemas.behavioral_test_unit import BehavioralTestUnit
 from worktop.test_agent.app.schemas.candidate_ranking import CandidateRanking
