@@ -99,8 +99,11 @@ Worktop model-client failures into a generation-friendly error.
 
 ### `worktop/test_agent/app/llm/default_llm_client.py`
 
-Adapter around Worktop's `DefaultLLMClient`. Handles prompt completion,
-structured JSON parsing into Pydantic models, and response text extraction.
+Tenant-aware adapter using Worktop's `CommonUtils`, `ModelsConfigurationDAO`,
+and `ModelClientFactory` directly. It calls `prepare_input()` and
+`generate_completion()` only on the factory-created provider client, and owns
+prompt completion, structured JSON parsing into Pydantic models, one bounded
+repair attempt, and supported response-text extraction.
 
 ## Orchestration
 
@@ -572,12 +575,6 @@ validation behavior.
 
 Syntax validation placeholder.
 
-## Utilities
-
-### `worktop/test_agent/app/utils/logging_utils.py`
-
-Builds consistent logging metadata for custom Worktop logging utilities.
-
 ## Decision Intelligence Hardening
 
 The placement/test-action decisions are wrapped in typed contracts and
@@ -697,11 +694,7 @@ Enforced in `worktop/test_agent/app/tools/repo_explorer_tool.py`.
 
 ## Logging Standard (Gap 37)
 
-### `worktop/test_agent/utils/logging.py`
-The single logging implementation: `get_logger(__name__)` (the only supported
-initialization pattern), idempotent `configure_logging`, the shared
-`LOG_FORMAT`, and `stage_log` — the standardized stage scope that renders
-banner / summary / decision sections and "completed in N seconds" timing.
-`worktop/test_agent/app/logging_config.py` re-exports these plus the
-structured `log_event` helper. The standard is enforced by
-`tests/test_logging_standard.py`.
+Application files import Worktop's consolidated `logger` directly from
+`worktop.core_services.app.utility.custom_logger.logging`. There is no local
+configuration or logging-helper module. The direct-import standard is enforced
+by `tests/test_logging_standard.py`.

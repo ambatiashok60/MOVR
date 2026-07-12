@@ -17,9 +17,8 @@ from worktop.test_agent.app.schemas.playwright_ui_context import (
 )
 from worktop.test_agent.app.schemas.repo_profile import RepoProfile
 from worktop.test_agent.app.schemas.repository_inventory import RepositoryInventory
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 
 class PlaywrightUiIntelligenceService:

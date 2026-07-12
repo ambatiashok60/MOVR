@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from worktop.test_agent.app.agents.base_agent import BaseAgent, logger
+from worktop.test_agent.app.agents.base_agent import BaseAgent
+from worktop.core_services.app.utility.custom_logger.logging import logger
 from worktop.test_agent.app.prompts.locator_reasoning_prompt import build_locator_reasoning_prompt
 from worktop.test_agent.app.schemas.locator_decision import LocatorDecision, LocatorDecisionSet
 from worktop.test_agent.app.schemas.source_intelligence import SourceIntelligence

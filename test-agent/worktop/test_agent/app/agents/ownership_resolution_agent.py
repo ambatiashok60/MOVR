@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from worktop.test_agent.app.agents.base_agent import BaseAgent, logger
+from worktop.test_agent.app.agents.base_agent import BaseAgent
+from worktop.core_services.app.utility.custom_logger.logging import logger
 from worktop.test_agent.app.prompts.ownership_resolution_prompt import build_ownership_resolution_prompt
 from worktop.test_agent.app.schemas.decision_trace import DecisionTrace
 from worktop.test_agent.app.schemas.functional_intent import FunctionalIntent

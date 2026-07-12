@@ -13,9 +13,8 @@ import json
 from typing import Any
 
 from worktop.test_agent.app.schemas.generation_request import GenerationRequest
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 
 class ScriptGenAdapter:

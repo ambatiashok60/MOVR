@@ -6,13 +6,11 @@ import re
 from pathlib import Path
 from typing import Any
 
-from worktop.test_agent.app.logging_config import log_event
 from worktop.test_agent.app.schemas.code_patch import PatchSet
 from worktop.test_agent.app.schemas.repository_policy import RepositoryPolicy
 from worktop.test_agent.app.schemas.validation_result import ValidationCheck
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 _POLICY_CANDIDATES = (
     ".movr/test-agent-policy.yaml",
@@ -46,26 +44,12 @@ class RepositoryPolicyService:
             try:
                 data = self._parse(path)
                 policy = RepositoryPolicy.model_validate({**data, "source": candidate})
-                log_event(
-                    logger,
-                    logging.INFO,
-                    "repository_policy",
-                    "loaded",
-                    source=candidate,
-                    generation=policy.generation.model_dump(),
-                )
+                logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'repository_policy', 'loaded', {'source': candidate, 'generation': policy.generation.model_dump()})
                 return policy
             except Exception as exc:
-                log_event(
-                    logger,
-                    logging.WARNING,
-                    "repository_policy",
-                    "invalid_policy_file",
-                    source=candidate,
-                    error=exc,
-                )
+                logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'repository_policy', 'invalid_policy_file', {'source': candidate, 'error': exc})
                 break
-        log_event(logger, logging.INFO, "repository_policy", "defaults_applied")
+        logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'repository_policy', 'defaults_applied', {})
         return RepositoryPolicy()
 
     def checks(self, patches: PatchSet, policy: RepositoryPolicy) -> list[ValidationCheck]:

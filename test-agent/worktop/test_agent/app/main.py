@@ -9,11 +9,7 @@ from worktop.test_agent.app.api.routes.generation_routes import router as genera
 from worktop.test_agent.app.api.routes.job_routes import router as job_router
 from worktop.test_agent.app.config import settings
 from worktop.test_agent.app.errors import UnsupportedRepositoryError
-from worktop.test_agent.app.logging_config import configure_logging
-from worktop.test_agent.utils.logging import get_logger
-
-configure_logging()
-logger = get_logger(__name__)
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
 app = FastAPI(title=settings.app_name)
 app.include_router(generation_router)

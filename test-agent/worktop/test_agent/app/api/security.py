@@ -18,9 +18,8 @@ from typing import Any
 
 from fastapi import HTTPException, Request, status
 
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 
 def resolve_tenant(*, request: Request, payload_tenant_id: int | None) -> int:

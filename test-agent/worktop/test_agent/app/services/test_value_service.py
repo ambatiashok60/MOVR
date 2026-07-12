@@ -3,15 +3,13 @@ from __future__ import annotations
 import logging
 
 from worktop.test_agent.app.coverage.coverage_preservation_service import CoveragePreservationService
-from worktop.test_agent.app.logging_config import log_event
 from worktop.test_agent.app.schemas.behavioral_test_unit import BehavioralTestUnit
 from worktop.test_agent.app.schemas.code_patch import PatchSet
 from worktop.test_agent.app.schemas.coverage import BehaviorCoverageEntry
 from worktop.test_agent.app.schemas.test_value import TestValueAssessment, TestValueReport, TestValueVerdict
 from worktop.test_agent.app.tools.playwright_parser_tool import PlaywrightParserTool
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 _SPEC_SUFFIXES = (".spec.ts", ".spec.tsx", ".e2e.ts", ".e2e.tsx", ".pw.ts", ".playwright.ts")
 
@@ -66,14 +64,7 @@ class TestValueService:
                 else "No newly generated tests to evaluate."
             ),
         )
-        log_event(
-            logger,
-            logging.WARNING if requires_approval else logging.INFO,
-            "test_value_analysis",
-            "requires_approval" if requires_approval else "completed",
-            tests=len(assessments),
-            verdicts=verdicts,
-        )
+        logger.log(logging.WARNING if requires_approval else logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'test_value_analysis', 'requires_approval' if requires_approval else 'completed', {'tests': len(assessments), 'verdicts': verdicts})
         return report
 
     def review_reasons(

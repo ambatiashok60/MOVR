@@ -7,9 +7,8 @@ from worktop.test_agent.app.llm.llm_client import LLMClient
 from worktop.test_agent.app.schemas.behavioral_test_unit import ExistingTestContext
 from worktop.test_agent.app.schemas.flow_merge import FlowMergePlan
 from worktop.test_agent.app.schemas.functional_intent import FunctionalIntent
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 
 class FlowMergeService:

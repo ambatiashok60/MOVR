@@ -6,9 +6,8 @@ import re
 from worktop.test_agent.app.schemas.code_patch import PatchSet
 from worktop.test_agent.app.schemas.playwright_ui_context import PlaywrightUiContext
 from worktop.test_agent.app.schemas.validation_result import ValidationCheck
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 
 class PlaywrightUiQualityValidator:

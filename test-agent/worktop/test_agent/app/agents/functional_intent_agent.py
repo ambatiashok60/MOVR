@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from worktop.test_agent.app.agents.base_agent import BaseAgent, logger
+from worktop.test_agent.app.agents.base_agent import BaseAgent
+from worktop.core_services.app.utility.custom_logger.logging import logger
 from worktop.test_agent.app.prompts.functional_intent_prompt import build_functional_intent_prompt
 from worktop.test_agent.app.schemas.functional_intent import FunctionalIntent
 from worktop.test_agent.app.schemas.generation_request import GenerationRequest

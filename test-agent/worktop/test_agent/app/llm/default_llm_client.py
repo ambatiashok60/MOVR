@@ -5,10 +5,9 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
 ResponseModel = TypeVar("ResponseModel", bound=BaseModel)
-logger = get_logger(__name__)
 
 # Only structured-parsing / validation failures should trigger the single repair
 # attempt. Transport, configuration and provider failures must propagate as-is so
@@ -24,17 +23,10 @@ EXPECTED_STRUCTURED_EXCEPTIONS = (
 class DefaultLLMClientAdapter:
     """Test-agent facing adapter over Worktop's configured model client.
 
-    Client construction follows the proven Worktop pattern: the preferred path is
-    the shared ``DefaultLLMClient`` because it already encapsulates tenant model
-    configuration lookup through ``ModelsConfigurationDAO`` and provider selection
-    through ``ModelClientFactory``. A direct ``ModelClientFactory`` fallback is
-    kept for installations where ``DefaultLLMClient`` is unavailable but the model
-    utilities are.
-
-    Whatever the underlying client turns out to be, ``prepare_input`` and
-    ``generate_completion`` are invoked defensively so the adapter behaves the
-    same whether it is holding the high-level wrapper (which may only expose
-    ``complete``) or a raw provider client returned by the factory.
+    Client construction follows one explicit Worktop integration path: shared
+    model parameters and decrypted tenant configuration are loaded first, then
+    ``ModelClientFactory.get_client`` creates the provider client. The adapter
+    never instantiates or probes the higher-level Worktop ``DefaultLLMClient``.
 
     Responsibilities that belong here: the ``complete`` / ``complete_structured``
     contract, structured-response validation, one repair attempt, and generic
@@ -45,7 +37,9 @@ class DefaultLLMClientAdapter:
     def __init__(self, db: Any, tenant_id: int | str) -> None:
         self._db = db
         self._tenant_id = self._normalize_tenant_id(tenant_id)
-        self._provider: str | None = None
+        self._model_params = self._load_model_params()
+        self._model_config = self._load_model_config()
+        self._provider = self._resolve_provider(self._model_config)
         self._client = self._create_client()
 
     # ------------------------------------------------------------------ #
@@ -162,47 +156,44 @@ class DefaultLLMClientAdapter:
         raise ValueError(f"Unsupported tenant_id type: {type(tenant_id)!r}")
 
     def _create_client(self) -> Any:
-        try:
-            from worktop.core_services.app.gen_ai_models.default_llm_client import (
-                DefaultLLMClient,
-            )
-
-            client = DefaultLLMClient(db=self._db, tenant_id=self._tenant_id)
-            self._provider = getattr(client, "provider", None)
-            return client
-        except Exception:
-            logger.info(
-                "DefaultLLMClient unavailable; falling back to direct "
-                "ModelClientFactory wiring (tenant_id=%s)",
-                self._tenant_id,
-            )
-            return self._create_direct_model_client()
-
-    def _create_direct_model_client(self) -> Any:
-        from worktop.core_services.app.dao.models_config_dao import (
-            ModelsConfigurationDAO,
-        )
         from worktop.core_services.app.gen_ai_models.model_client_factory import (
             ModelClientFactory,
         )
-        from worktop.core_services.app.utility.common_utils import CommonUtils
 
-        model_info = CommonUtils.load_model_info(self._db, self._tenant_id)
-        model_params = (
-            model_info.get("model_params", {}) if isinstance(model_info, dict) else {}
-        )
-        model_config = ModelsConfigurationDAO(self._db).get_model_config_by_tenant_id(
-            self._tenant_id
-        )
-        provider = self._resolve_provider(model_config)
-        self._provider = provider
         return ModelClientFactory.get_client(
-            provider,
-            model_config,
-            model_params,
+            self._provider,
+            self._model_config,
+            self._model_params,
             self._db,
             self._tenant_id,
         )
+
+    def _load_model_params(self) -> dict[str, Any]:
+        """Load shared Worktop model parameters using the host utility contract."""
+        from worktop.core_services.app.utility.common_utils import CommonUtils
+
+        model_info = CommonUtils.load_model_info(self._db, self._tenant_id)
+        if not isinstance(model_info, dict):
+            raise TypeError("Worktop model information must be a dictionary")
+        model_params = model_info.get("model_params", {})
+        if not isinstance(model_params, dict):
+            raise TypeError("Worktop model_params must be a dictionary")
+        return model_params
+
+    def _load_model_config(self) -> Any:
+        """Load tenant model configuration using the current Worktop DAO contract."""
+        from worktop.core_services.app.dao.models_config_dao import (
+            ModelsConfigurationDAO,
+        )
+
+        model_config = ModelsConfigurationDAO(self._db).get_model_config_by_tenant_id(
+            self._tenant_id
+        )
+        if model_config is None:
+            raise RuntimeError(
+                f"No model configuration found for tenant {self._tenant_id}"
+            )
+        return model_config
 
     def _resolve_provider(self, model_config: Any) -> str:
         if isinstance(model_config, dict):
@@ -220,22 +211,12 @@ class DefaultLLMClientAdapter:
     # Provider invocation (ownership stays with the factory-created client)
     # ------------------------------------------------------------------ #
     def _prepare_input(self, prompt: str, system_prompt: str) -> Any:
-        if hasattr(self._client, "prepare_input"):
-            return self._client.prepare_input(
-                system_prompt=system_prompt, user_prompt=prompt
-            )
-        return prompt
+        return self._client.prepare_input(
+            system_prompt=system_prompt, user_prompt=prompt
+        )
 
     def _generate_completion(self, input_data: Any) -> Any:
-        if hasattr(self._client, "generate_completion"):
-            return self._client.generate_completion(input_data)
-        if hasattr(self._client, "complete"):
-            return self._client.complete(input_data)
-        if hasattr(self._client, "invoke"):
-            return self._client.invoke(input_data)
-        raise RuntimeError(
-            "Configured model client does not expose a supported completion method"
-        )
+        return self._client.generate_completion(input_data)
 
     # ------------------------------------------------------------------ #
     # Response normalization
@@ -258,8 +239,10 @@ class DefaultLLMClientAdapter:
             joined = self._extract_text_from_blocks(text)
             if joined:
                 return joined
-        logger.warning("LLM response type did not expose a known text field")
-        return str(response)
+        raise TypeError(
+            "LLM provider response did not expose a supported text field "
+            f"(type={type(response).__name__})"
+        )
 
     def _extract_text_from_mapping(self, response: dict[str, Any]) -> str | None:
         for key in ("content", "text", "response", "completion", "message"):

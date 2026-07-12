@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from worktop.test_agent.app.llm.default_llm_client import DefaultLLMClientAdapter
-from worktop.test_agent.app.logging_config import LOG_FORMAT
 from worktop.test_agent.app.prompts.functional_intent_prompt import (
     build_functional_intent_prompt,
 )
@@ -1015,12 +1014,6 @@ def test_complete_decision_trace_is_not_flagged() -> None:
         reasons,
     )
     assert reasons == []
-
-
-def test_log_format_includes_source_location_and_function() -> None:
-    assert "%(filename)s" in LOG_FORMAT
-    assert "%(lineno)d" in LOG_FORMAT
-    assert "%(funcName)s" in LOG_FORMAT
 
 
 def test_repair_loop_rolls_back_repairs_and_revalidates() -> None:

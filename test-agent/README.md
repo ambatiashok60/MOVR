@@ -55,7 +55,7 @@ The current implementation includes:
 - Playwright validation for test discovery and duplicate titles within spec
   files.
 - Validation placeholders for syntax checks and repo command validation.
-- Shared logging metadata helper at `worktop/test_agent/app/utils/logging_utils.py`.
+- Direct Worktop custom-logger imports across logging application modules.
 - Repository support classification for beta-fit, warning-fit, and unsupported
   repositories.
 
@@ -821,7 +821,7 @@ wire real package-manager commands and parser-based duplicate test checks.
 
 Agents must use the existing model abstraction instead of provider SDKs.
 
-Preferred shape:
+Required construction path:
 
 ```python
 self.llm = ModelClientFactory.get_client(
@@ -833,14 +833,11 @@ self.llm = ModelClientFactory.get_client(
 )
 ```
 
-Or, if using the existing wrapper:
-
-```python
-self.llm = DefaultLLMClient(
-    db=db,
-    tenant_id=tenant_id,
-)
-```
+`test-agent` deliberately does not instantiate Worktop's higher-level
+`DefaultLLMClient`. Mixing that wrapper contract with provider-level methods
+made ownership ambiguous. The adapter loads shared model parameters and tenant
+model configuration, validates `provider_name`, and passes all three to
+`ModelClientFactory.get_client(...)`.
 
 Agent usage:
 
@@ -863,7 +860,39 @@ worktop/test_agent/app/prompts/
 
 `GenerationRuntime` is created per request and carries the job, tenant,
 repository, branch, database handle, and LLM client. `LLMClientFactory` creates
-a `DefaultLLMClientAdapter` from the existing Worktop model stack.
+a `DefaultLLMClientAdapter`, which constructs the provider client directly
+through Worktop's `ModelClientFactory`.
+
+The host integration contract is:
+
+```text
+CommonUtils.load_model_info(db, tenant_id)
+  -> model_params
+ModelsConfigurationDAO(db).get_model_config_by_tenant_id(tenant_id)
+  -> model_config + provider_name
+ModelClientFactory.get_client(provider_name, model_config, model_params, db, tenant_id)
+  -> provider client
+provider client.prepare_input(...)
+provider client.generate_completion(...)
+```
+
+These external method signatures must be checked when integrating into a
+Worktop version that changes its core-services API; `test-agent` must not add a
+second wrapper fallback to hide such incompatibility.
+
+## Logging Integration
+
+All application modules import Worktop's logger directly:
+
+```python
+from worktop.core_services.app.utility.custom_logger.logging import logger
+```
+
+Worktop therefore remains responsible for production handlers, console output,
+and centralized sinks. `test-agent` must not call `logging.getLogger()` or
+configure handlers in individual application modules. Standalone tests install
+a test-only logger stub in `conftest.py`; production has a hard dependency on
+the Worktop custom-logger module.
 
 Because this is an agentic generation process, missing model configuration is a
 hard failure. If `tenant_id` is absent or the real client cannot be created, the
@@ -895,47 +924,19 @@ This preserves:
 
 ## Logging Design
 
-The scaffold reuses the existing custom logger package:
+Every logging application file imports only the Worktop logger:
 
 ```python
-from worktop.core_services.app.utility.custom_logger.log_helpers import (
-    log_card_simple,
-    log_exception,
-    log_metric,
-    log_step,
-)
-
-from worktop.core_services.app.utility.custom_logger.logging import (
-    log_performance,
-    logger,
-)
+from worktop.core_services.app.utility.custom_logger.logging import logger
 ```
 
-It does not create a new logger.
-
-Shared logging metadata is normalized by:
-
-```text
-worktop/test_agent/app/utils/logging_utils.py
-```
-
-Supported metadata keys:
-
-```text
-job_id
-tenant_id
-repo_path
-branch
-stage
-agent_name
-```
-
-Standard patterns:
+There is no local logger creation, configuration, event wrapper, stage wrapper,
+metadata helper, or performance decorator. Context is supplied directly in
+normal logger messages:
 
 ```python
-log_step("repo_strategy_started", {"repo_path": repo_path})
-log_metric("candidate_tests_count", len(candidate_tests))
-logger.info("Generation job completed successfully")
+logger.info("job_id=%s stage=%s status=started", job_id, stage)
+logger.warning("job_id=%s stage=%s status=review_required", job_id, stage)
 ```
 
 Exception pattern:
@@ -944,16 +945,12 @@ Exception pattern:
 try:
     ...
 except Exception as exc:
-    log_exception(exc, context={"job_id": job_id, "stage": "spec_placement"})
+    logger.exception(
+        "job_id=%s stage=spec_placement status=failed error=%s",
+        job_id,
+        exc,
+    )
     raise
-```
-
-Performance pattern:
-
-```python
-@log_performance("repo_strategy_service.detect")
-def detect(...):
-    ...
 ```
 
 ## Decision Contract
@@ -1247,16 +1244,14 @@ the orchestration.
 
 ### Logging Standardization & Workflow Observability (Gap 37)
 
-Logging follows one standard across the whole framework:
+Logging uses the Worktop logger directly across the whole framework:
 
 ```python
-from worktop.test_agent.utils.logging import get_logger
-
-logger = get_logger(__name__)
+from worktop.core_services.app.utility.custom_logger.logging import logger
 ```
 
-This is the only supported pattern — no `print()`, no custom logger
-initialization, no ad-hoc logging utilities (all enforced by
+This is the only supported pattern—no `print()`, local logger initialization,
+configuration module, or intermediary logging helpers (all enforced by
 `tests/test_logging_standard.py`, which scans the package source). Levels are
 used consistently: DEBUG for internals (prompt construction, model response
 parsing, tool output), INFO for workflow progress and decisions, WARNING for
@@ -1264,8 +1259,9 @@ recoverable issues (structured-response repair, fallbacks), ERROR for stage
 failures, and `logger.exception` for unexpected exceptions. Prompts and raw
 LLM responses never appear above DEBUG.
 
-Every orchestrator stage logs through a shared `stage_log` scope that renders
-the standard workflow format:
+Orchestrator stages call `logger.info`, `logger.warning`, `logger.error`, or
+`logger.exception` directly and include job, stage, status, and relevant
+details in the message.
 
 ```
 ============================================================

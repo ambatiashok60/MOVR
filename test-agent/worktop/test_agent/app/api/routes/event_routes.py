@@ -9,9 +9,8 @@ from fastapi.responses import StreamingResponse
 from worktop.test_agent.app.api.security import validate_job_tenant
 from worktop.test_agent.app.runtime import scriptgen_runtime
 from worktop.test_agent.app.services.generation_job_store import generation_job_store
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/playwright/events", tags=["generation-events"])
 

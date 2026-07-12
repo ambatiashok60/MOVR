@@ -52,11 +52,10 @@ from worktop.test_agent.app.services.test_value_service import TestValueService
 from worktop.test_agent.app.services.traceability_service import TraceabilityService
 from worktop.test_agent.app.schemas.validation_result import ValidationCheck, ValidationResult
 from worktop.test_agent.app.workspace.workspace_manager import JobWorkspace, WorkspaceManager
-from worktop.test_agent.app.logging_config import log_event
-from worktop.test_agent.utils.logging import BANNER, stage_log
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
+BANNER = "=" * 60
+
 
 
 class GenerationOrchestrator:
@@ -184,15 +183,7 @@ class GenerationOrchestrator:
             )
             if existing_record is not None:
                 replay = self.idempotency.replay_result(request, existing_record)
-                log_event(
-                    logger,
-                    logging.INFO,
-                    "generation",
-                    "idempotent_replay",
-                    job_id=request.job_id,
-                    original_job=existing_record.job_id,
-                    fingerprint=generation_fingerprint,
-                )
+                logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'generation', 'idempotent_replay', {'job_id': request.job_id, 'original_job': existing_record.job_id, 'fingerprint': generation_fingerprint})
                 return replay
 
             ui_context = self._run_stage(
@@ -302,14 +293,7 @@ class GenerationOrchestrator:
                     lambda: flow_merge.plan(intent, existing_test_context),
                 )
             else:
-                log_event(
-                    logger,
-                    logging.INFO,
-                    "flow_merge",
-                    "skipped",
-                    action=action.action,
-                    reason="flow_merge_only_applies_to_extension",
-                )
+                logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'flow_merge', 'skipped', {'action': action.action, 'reason': 'flow_merge_only_applies_to_extension'})
             self._flag_low_flow_merge_confidence(flow_plan, review_reasons)
             ownership_resolution = self._run_optional_stage(
                 request.job_id,
@@ -513,27 +497,10 @@ class GenerationOrchestrator:
             )
             return result
         except BudgetExceededError as exc:
-            log_event(
-                logger,
-                logging.ERROR,
-                "generation",
-                "escalated",
-                job_id=request.job_id,
-                duration_ms=round((perf_counter() - generation_started_at) * 1000, 2),
-                reason=str(exc),
-                usage=exc.report.usage.model_dump(),
-            )
+            logger.log(logging.ERROR, "[playwright-generation] stage=%s | status=%s | details=%s", 'generation', 'escalated', {'job_id': request.job_id, 'duration_ms': round((perf_counter() - generation_started_at) * 1000, 2), 'reason': str(exc), 'usage': exc.report.usage.model_dump()})
             raise
         except Exception as exc:
-            log_event(
-                logger,
-                logging.ERROR,
-                "generation",
-                "failed",
-                job_id=request.job_id,
-                duration_ms=round((perf_counter() - generation_started_at) * 1000, 2),
-                error=exc,
-            )
+            logger.log(logging.ERROR, "[playwright-generation] stage=%s | status=%s | details=%s", 'generation', 'failed', {'job_id': request.job_id, 'duration_ms': round((perf_counter() - generation_started_at) * 1000, 2), 'error': exc})
             logger.exception(
                 "[playwright-generation] job_id=%s stage=generation status=failed context=%s error=%s",
                 request.job_id,
@@ -560,14 +527,7 @@ class GenerationOrchestrator:
         weakened coverage is flagged for review, never silently accepted.
         """
         if not patch_result.applied:
-            log_event(
-                logger,
-                logging.INFO,
-                "coverage_preservation",
-                "skipped",
-                job_id=request.job_id,
-                reason="no_patches_applied",
-            )
+            logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'coverage_preservation', 'skipped', {'job_id': request.job_id, 'reason': 'no_patches_applied'})
             return None
 
         def build_report() -> Any:
@@ -586,8 +546,9 @@ class GenerationOrchestrator:
 
     def _run_advisory_stage(self, job_id: str, stage: str, action: Any) -> None:
         try:
-            with stage_log(logger, stage, job_id=job_id):
-                action()
+            logger.info("job_id=%s stage=%s status=started", job_id, stage)
+            action()
+            logger.info("job_id=%s stage=%s status=completed", job_id, stage)
         except Exception:
             logger.exception(
                 "Advisory stage %s failed; generation continues unaffected.", stage
@@ -600,8 +561,10 @@ class GenerationOrchestrator:
         an advisory-quality signal never aborts the overall generation.
         """
         try:
-            with stage_log(logger, stage, job_id=job_id):
-                return action()
+            logger.info("job_id=%s stage=%s status=started", job_id, stage)
+            result = action()
+            logger.info("job_id=%s stage=%s status=completed", job_id, stage)
+            return result
         except Exception:
             logger.exception(
                 "Optional stage %s failed; continuing without its result.", stage
@@ -629,18 +592,21 @@ class GenerationOrchestrator:
         started: dict[str, Any] | None = None,
         completed: Callable[[Any], dict[str, Any]] | None = None,
     ) -> Any:
-        with stage_log(logger, stage, job_id=job_id, **(started or {})) as log:
-            result = action()
-            completed_details = completed(result) if completed else {}
-            if completed_details:
-                log.section(
-                    "Summary",
-                    "\n".join(
-                        f"{key}: {value}"
-                        for key, value in completed_details.items()
-                    ),
-                )
-            return result
+        logger.info(
+            "job_id=%s stage=%s status=started details=%s",
+            job_id,
+            stage,
+            started or {},
+        )
+        result = action()
+        completed_details = completed(result) if completed else {}
+        logger.info(
+            "job_id=%s stage=%s status=completed details=%s",
+            job_id,
+            stage,
+            completed_details,
+        )
+        return result
 
     def _write_validate_and_repair(
         self,
@@ -704,18 +670,7 @@ class GenerationOrchestrator:
         for attempt in range(1, max_attempts + 1):
             if budget is not None:
                 budget.charge_repair_attempt()
-            log_event(
-                logger,
-                logging.WARNING,
-                "repair_loop",
-                "validation_failed",
-                job_id=request.job_id,
-                attempt=attempt,
-                max_attempts=max_attempts,
-                failed_checks=[
-                    check.name for check in validation.checks if not check.passed
-                ],
-            )
+            logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'repair_loop', 'validation_failed', {'job_id': request.job_id, 'attempt': attempt, 'max_attempts': max_attempts, 'failed_checks': [check.name for check in validation.checks if not check.passed]})
             self._run_stage(
                 request.job_id,
                 "patch_rollback",
@@ -765,26 +720,10 @@ class GenerationOrchestrator:
             validation = self._validate_patches(request, patches, ui_context, attempt=attempt)
             validation.repair_attempted = True
             if validation.passed:
-                log_event(
-                    logger,
-                    logging.INFO,
-                    "repair_loop",
-                    "completed",
-                    job_id=request.job_id,
-                    attempts=attempt,
-                    passed=True,
-                )
+                logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'repair_loop', 'completed', {'job_id': request.job_id, 'attempts': attempt, 'passed': True})
                 return patch_result, validation, patches
 
-        log_event(
-            logger,
-            logging.WARNING,
-            "repair_loop",
-            "exhausted",
-            job_id=request.job_id,
-            attempts=max_attempts,
-            passed=False,
-        )
+        logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'repair_loop', 'exhausted', {'job_id': request.job_id, 'attempts': max_attempts, 'passed': False})
         validation.repair_attempted = max_attempts > 0
         if policy is not None and policy.generation.rollback_failed_patch:
             self._run_stage(
@@ -805,13 +744,7 @@ class GenerationOrchestrator:
         candidates: list[BehavioralTestUnit],
     ) -> ExistingTestContext | None:
         if action.action != TestActions.EXTEND_EXISTING_TEST:
-            log_event(
-                logger,
-                logging.INFO,
-                "existing_test_context",
-                "skipped",
-                action=action.action,
-            )
+            logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'existing_test_context', 'skipped', {'action': action.action})
             return None
 
         target_spec = placement.target_spec_file
@@ -831,38 +764,14 @@ class GenerationOrchestrator:
         if not matches and candidates:
             matches = [candidates[0]]
         if not matches:
-            log_event(
-                logger,
-                logging.WARNING,
-                "existing_test_context",
-                "missing",
-                target_spec=target_spec or "none",
-                target_test=target_title or "none",
-            )
+            logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'existing_test_context', 'missing', {'target_spec': target_spec or 'none', 'target_test': target_title or 'none'})
             return None
 
         selected = matches[0]
         if selected.test_title != target_title:
-            log_event(
-                logger,
-                logging.WARNING,
-                "existing_test_context",
-                "fallback_selected",
-                requested_title=target_title or "none",
-                selected_title=selected.test_title,
-                file=selected.file_path,
-                lines=f"{selected.start_line}-{selected.end_line}",
-            )
+            logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'existing_test_context', 'fallback_selected', {'requested_title': target_title or 'none', 'selected_title': selected.test_title, 'file': selected.file_path, 'lines': f'{selected.start_line}-{selected.end_line}'})
         else:
-            log_event(
-                logger,
-                logging.INFO,
-                "existing_test_context",
-                "selected",
-                file=selected.file_path,
-                test_title=selected.test_title,
-                lines=f"{selected.start_line}-{selected.end_line}",
-            )
+            logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'existing_test_context', 'selected', {'file': selected.file_path, 'test_title': selected.test_title, 'lines': f'{selected.start_line}-{selected.end_line}'})
 
         return ExistingTestContext(
             file_path=selected.file_path,
@@ -898,15 +807,7 @@ class GenerationOrchestrator:
         if placement.create_new and placement.target_spec_file == normalized_target:
             return placement
 
-        log_event(
-            logger,
-            logging.INFO,
-            "spec_placement",
-            "bootstrap_normalized",
-            from_target=placement.target_spec_file,
-            to_target=normalized_target,
-            from_create_new=placement.create_new,
-        )
+        logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'spec_placement', 'bootstrap_normalized', {'from_target': placement.target_spec_file, 'to_target': normalized_target, 'from_create_new': placement.create_new})
         placement.target_spec_file = normalized_target
         placement.create_new = True
         return placement
@@ -924,15 +825,7 @@ class GenerationOrchestrator:
             f"review threshold {threshold:.2f} for {placement.target_spec_file}."
         )
         review_reasons.append(reason)
-        log_event(
-            logger,
-            logging.WARNING,
-            "spec_placement",
-            "low_confidence_flagged",
-            confidence=placement.confidence,
-            threshold=threshold,
-            target_spec=placement.target_spec_file,
-        )
+        logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'spec_placement', 'low_confidence_flagged', {'confidence': placement.confidence, 'threshold': threshold, 'target_spec': placement.target_spec_file})
 
     def _flag_shallow_decision_trace(
         self,
@@ -954,15 +847,7 @@ class GenerationOrchestrator:
             f"{stage} decision trace lacks a decision, justification, or evidence; "
             "manual review recommended."
         )
-        log_event(
-            logger,
-            logging.WARNING,
-            stage,
-            "shallow_decision_trace",
-            decision=decision or "empty",
-            has_justification=bool(justification),
-            evidence_count=len(evidence),
-        )
+        logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", stage, 'shallow_decision_trace', {'decision': decision or 'empty', 'has_justification': bool(justification), 'evidence_count': len(evidence)})
 
     def _flag_low_flow_merge_confidence(
         self,
@@ -979,14 +864,7 @@ class GenerationOrchestrator:
             f"threshold {threshold:.2f}; preserved flow may be incomplete."
         )
         review_reasons.append(reason)
-        log_event(
-            logger,
-            logging.WARNING,
-            "flow_merge",
-            "low_confidence_flagged",
-            confidence=flow_plan.confidence,
-            threshold=threshold,
-        )
+        logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'flow_merge', 'low_confidence_flagged', {'confidence': flow_plan.confidence, 'threshold': threshold})
 
     def _flag_low_ownership_confidence(
         self,
@@ -1004,16 +882,7 @@ class GenerationOrchestrator:
             f"(create_new={ownership.create_new})."
         )
         review_reasons.append(reason)
-        log_event(
-            logger,
-            logging.WARNING,
-            "ownership_resolution",
-            "low_confidence_flagged",
-            confidence=ownership.confidence,
-            threshold=threshold,
-            owner_path=ownership.owner_path,
-            create_new=ownership.create_new,
-        )
+        logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'ownership_resolution', 'low_confidence_flagged', {'confidence': ownership.confidence, 'threshold': threshold, 'owner_path': ownership.owner_path, 'create_new': ownership.create_new})
 
     def _gate_action_confidence(
         self,
@@ -1036,28 +905,11 @@ class GenerationOrchestrator:
         )
 
         if action.action != TestActions.EXTEND_EXISTING_TEST:
-            log_event(
-                logger,
-                logging.WARNING,
-                "test_action_decision",
-                "low_confidence_flagged",
-                action=action.action,
-                confidence=action.confidence,
-                threshold=threshold,
-            )
+            logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'test_action_decision', 'low_confidence_flagged', {'action': action.action, 'confidence': action.confidence, 'threshold': threshold})
             return action
 
         capped_confidence = min(action.confidence, 0.35)
-        log_event(
-            logger,
-            logging.WARNING,
-            "test_action_decision",
-            "low_confidence_downgraded",
-            from_action=action.action,
-            to_action=TestActions.APPEND_NEW_TEST,
-            confidence=action.confidence,
-            threshold=threshold,
-        )
+        logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'test_action_decision', 'low_confidence_downgraded', {'from_action': action.action, 'to_action': TestActions.APPEND_NEW_TEST, 'confidence': action.confidence, 'threshold': threshold})
         return TestActionDecision(
             action=TestActions.APPEND_NEW_TEST,
             target_test_title=None,
@@ -1108,16 +960,7 @@ class GenerationOrchestrator:
             )
 
         capped_confidence = min(action.confidence, 0.4)
-        log_event(
-            logger,
-            logging.WARNING,
-            "test_action_decision",
-            "reconciled_with_placement",
-            from_action=action.action,
-            to_action=coerced_action,
-            placement_create_new=placement.create_new,
-            target_spec=placement.target_spec_file,
-        )
+        logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'test_action_decision', 'reconciled_with_placement', {'from_action': action.action, 'to_action': coerced_action, 'placement_create_new': placement.create_new, 'target_spec': placement.target_spec_file})
         return TestActionDecision(
             action=coerced_action,
             target_test_title=None,
@@ -1167,23 +1010,11 @@ class GenerationOrchestrator:
             pool_description = "existing test(s) across the repository"
             empty_reason = "no_template_candidates_in_repository"
         else:
-            log_event(
-                logger,
-                logging.INFO,
-                "anchor_flow_context",
-                "skipped",
-                action=action.action,
-            )
+            logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'anchor_flow_context', 'skipped', {'action': action.action})
             return None
 
         if not pool:
-            log_event(
-                logger,
-                logging.INFO,
-                "anchor_flow_context",
-                empty_reason,
-                target_spec=placement.target_spec_file,
-            )
+            logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'anchor_flow_context', empty_reason, {'target_spec': placement.target_spec_file})
             return None
 
         anchor = max(
@@ -1199,17 +1030,7 @@ class GenerationOrchestrator:
             f"reusable setup ({len(anchor.page_objects)} page object(s), "
             f"{len(anchor.fixtures)} fixture(s)) among {len(pool)} {pool_description}."
         )
-        log_event(
-            logger,
-            logging.INFO,
-            "anchor_flow_context",
-            "selected",
-            file=anchor.file_path,
-            anchor_test=anchor.test_title,
-            page_objects=len(anchor.page_objects),
-            fixtures=len(anchor.fixtures),
-            pool=len(pool),
-        )
+        logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'anchor_flow_context', 'selected', {'file': anchor.file_path, 'anchor_test': anchor.test_title, 'page_objects': len(anchor.page_objects), 'fixtures': len(anchor.fixtures), 'pool': len(pool)})
         return AnchorFlowContext(
             file_path=anchor.file_path,
             describe_title=anchor.describe_title,
@@ -1232,15 +1053,7 @@ class GenerationOrchestrator:
         ):
             return action
 
-        log_event(
-            logger,
-            logging.WARNING,
-            "existing_test_context",
-            "downgraded_action",
-            from_action=action.action,
-            to_action="append_new_test",
-            reason="no_valid_existing_test_context",
-        )
+        logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'existing_test_context', 'downgraded_action', {'from_action': action.action, 'to_action': 'append_new_test', 'reason': 'no_valid_existing_test_context'})
         return TestActionDecision(
             action=TestActions.APPEND_NEW_TEST,
             target_test_title=None,
@@ -1704,18 +1517,7 @@ class GenerationOrchestrator:
         for attempt in range(1, max_attempts + 1):
             if budget is not None:
                 budget.charge_repair_attempt()
-            log_event(
-                logger,
-                logging.WARNING,
-                "repair_loop",
-                "plan_failed",
-                job_id=request.job_id,
-                attempt=attempt,
-                max_attempts=max_attempts,
-                failed_checks=[
-                    check.name for check in validation.checks if not check.passed
-                ],
-            )
+            logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'repair_loop', 'plan_failed', {'job_id': request.job_id, 'attempt': attempt, 'max_attempts': max_attempts, 'failed_checks': [check.name for check in validation.checks if not check.passed]})
             repaired_patches = self._run_stage(
                 request.job_id,
                 "repair_generation",
@@ -1750,26 +1552,10 @@ class GenerationOrchestrator:
             )
             validation.repair_attempted = True
             if validation.passed:
-                log_event(
-                    logger,
-                    logging.INFO,
-                    "repair_loop",
-                    "plan_completed",
-                    job_id=request.job_id,
-                    attempts=attempt,
-                    passed=True,
-                )
+                logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'repair_loop', 'plan_completed', {'job_id': request.job_id, 'attempts': attempt, 'passed': True})
                 return patches, validation
 
-        log_event(
-            logger,
-            logging.WARNING,
-            "repair_loop",
-            "plan_exhausted",
-            job_id=request.job_id,
-            attempts=max_attempts,
-            passed=False,
-        )
+        logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'repair_loop', 'plan_exhausted', {'job_id': request.job_id, 'attempts': max_attempts, 'passed': False})
         validation.repair_attempted = max_attempts > 0
         return patches, validation
 

@@ -15,9 +15,8 @@ from worktop.test_agent.app.schemas.playwright_generation_api import (
     GenerationAbortResponse,
 )
 from worktop.test_agent.app.services.generation_job_store import generation_job_store
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/playwright/jobs", tags=["generation-jobs"])
 

@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from typing import Any
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
 
-logger = get_logger(__name__)
 
 
 class AngularParserTool:

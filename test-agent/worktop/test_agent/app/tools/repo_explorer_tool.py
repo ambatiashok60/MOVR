@@ -3,9 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from worktop.test_agent.app.security.data_governance_service import DataGovernanceService
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 MAX_FILE_CHARS = 6000
 MAX_SEARCH_HITS = 20

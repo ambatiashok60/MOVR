@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from worktop.test_agent.app.agents.base_agent import BaseAgent, logger
+from worktop.test_agent.app.agents.base_agent import BaseAgent
+from worktop.core_services.app.utility.custom_logger.logging import logger
 from worktop.test_agent.app.prompts.source_mapping_prompt import build_source_mapping_prompt
 from worktop.test_agent.app.schemas.functional_intent import FunctionalIntent
 from worktop.test_agent.app.schemas.playwright_ui_context import PlaywrightUiContext

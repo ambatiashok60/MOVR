@@ -31,9 +31,8 @@ from worktop.test_agent.app.schemas.generation_status import (
     JOB_RUNNING,
     TERMINAL_JOB_STATUSES,
 )
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 
 def _utcnow() -> datetime:

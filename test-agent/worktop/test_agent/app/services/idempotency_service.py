@@ -7,14 +7,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from worktop.test_agent.app.config import settings
-from worktop.test_agent.app.logging_config import log_event
 from worktop.test_agent.app.schemas.generation_request import GenerationRequest
 from worktop.test_agent.app.schemas.generation_result import GenerationResult
 from worktop.test_agent.app.schemas.idempotency import IdempotencyRecord
 from worktop.test_agent.app.schemas.repository_inventory import RepositoryInventory
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 
 class IdempotencyService:
@@ -52,15 +50,7 @@ class IdempotencyService:
         if record is None:
             return None
         found = IdempotencyRecord.model_validate(record)
-        log_event(
-            logger,
-            logging.INFO,
-            "idempotency",
-            "duplicate_generation_detected",
-            fingerprint=fingerprint,
-            original_job=found.job_id,
-            completed_at=found.completed_at,
-        )
+        logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'idempotency', 'duplicate_generation_detected', {'fingerprint': fingerprint, 'original_job': found.job_id, 'completed_at': found.completed_at})
         return found
 
     def record(self, fingerprint: str, result: GenerationResult) -> None:
@@ -78,14 +68,7 @@ class IdempotencyService:
         self.registry_path.write_text(
             json.dumps(registry, indent=2), encoding="utf-8"
         )
-        log_event(
-            logger,
-            logging.INFO,
-            "idempotency",
-            "recorded",
-            fingerprint=fingerprint,
-            job_id=result.job_id,
-        )
+        logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'idempotency', 'recorded', {'fingerprint': fingerprint, 'job_id': result.job_id})
 
     def replay_result(
         self, request: GenerationRequest, record: IdempotencyRecord

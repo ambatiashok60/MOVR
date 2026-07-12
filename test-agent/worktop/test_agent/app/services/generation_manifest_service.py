@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any
 
 from worktop.test_agent.app.config import settings
-from worktop.test_agent.app.logging_config import log_event
 from worktop.test_agent.app.schemas.code_patch import PatchSet
 from worktop.test_agent.app.schemas.generation_manifest import (
     GenerationManifest,
@@ -17,9 +16,8 @@ from worktop.test_agent.app.schemas.generation_manifest import (
 from worktop.test_agent.app.schemas.generation_request import GenerationRequest
 from worktop.test_agent.app.schemas.repository_inventory import RepositoryInventory
 from worktop.test_agent.app.schemas.repository_policy import RepositoryPolicy
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 _PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 _RECORDED_SETTINGS = (
@@ -86,17 +84,7 @@ class GenerationManifestService:
             ],
         )
         manifest.generation_fingerprint = self._fingerprint(manifest, request)
-        log_event(
-            logger,
-            logging.INFO,
-            "generation_manifest",
-            "built",
-            job_id=request.job_id,
-            fingerprint=manifest.generation_fingerprint,
-            repo_head=manifest.repo_head or "unknown",
-            decisions=len(manifest.decisions),
-            patches=len(manifest.patches),
-        )
+        logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'generation_manifest', 'built', {'job_id': request.job_id, 'fingerprint': manifest.generation_fingerprint, 'repo_head': manifest.repo_head or 'unknown', 'decisions': len(manifest.decisions), 'patches': len(manifest.patches)})
         return manifest
 
     def prompt_versions(self) -> dict[str, str]:

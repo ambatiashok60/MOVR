@@ -7,7 +7,6 @@ from collections.abc import Callable
 from pathlib import Path
 from time import perf_counter
 
-from worktop.test_agent.app.logging_config import log_event
 from worktop.test_agent.app.schemas.benchmark import (
     BenchmarkRegression,
     BenchmarkReport,
@@ -16,9 +15,8 @@ from worktop.test_agent.app.schemas.benchmark import (
 )
 from worktop.test_agent.app.schemas.generation_request import GenerationRequest
 from worktop.test_agent.app.schemas.generation_result import GenerationResult
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 GenerateFn = Callable[[GenerationRequest], GenerationResult]
 
@@ -41,14 +39,7 @@ class BenchmarkRunner:
     ) -> BenchmarkReport:
         outcomes = [self._run_scenario(scenario, generate) for scenario in scenarios]
         report = BenchmarkReport(outcomes=outcomes, metrics=self._metrics(outcomes))
-        log_event(
-            logger,
-            logging.INFO,
-            "benchmark",
-            "completed",
-            scenarios=len(outcomes),
-            **{name: value for name, value in report.metrics.items()},
-        )
+        logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'benchmark', 'completed', {'scenarios': len(outcomes)})
         return report
 
     def detect_regressions(

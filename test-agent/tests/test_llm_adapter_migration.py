@@ -2,9 +2,8 @@
 
 Covers the two things the migration is responsible for:
 
-* Worktop client construction — the preferred DefaultLLMClient path and the
-  direct ModelClientFactory fallback, with tenant normalization and provider
-  resolution.
+* Worktop client construction through the sole direct ``ModelClientFactory``
+  path, with tenant normalization and provider resolution.
 * The adapter's own contract — caller-supplied system prompts, response
   normalization across provider shapes, and schema-aware structured parsing
   with a single repair attempt.
@@ -32,7 +31,6 @@ _CORE_MODULES = [
     "worktop.core_services",
     "worktop.core_services.app",
     "worktop.core_services.app.gen_ai_models",
-    "worktop.core_services.app.gen_ai_models.default_llm_client",
     "worktop.core_services.app.gen_ai_models.model_client_factory",
     "worktop.core_services.app.dao",
     "worktop.core_services.app.dao.models_config_dao",
@@ -41,35 +39,28 @@ _CORE_MODULES = [
 ]
 
 
-def _install_core_services(monkeypatch, *, default_client_cls, dao_cls=None,
-                           factory_cls=None, common_utils_cls=None):
+def _install_core_services(monkeypatch, *, dao_cls, factory_cls, common_utils_cls):
     """Register fake core_services modules so lazy adapter imports resolve."""
     modules: dict[str, types.ModuleType] = {}
     for name in _CORE_MODULES:
         modules[name] = types.ModuleType(name)
 
     modules[
-        "worktop.core_services.app.gen_ai_models.default_llm_client"
-    ].DefaultLLMClient = default_client_cls
-    if dao_cls is not None:
-        modules[
-            "worktop.core_services.app.dao.models_config_dao"
-        ].ModelsConfigurationDAO = dao_cls
-    if factory_cls is not None:
-        modules[
-            "worktop.core_services.app.gen_ai_models.model_client_factory"
-        ].ModelClientFactory = factory_cls
-    if common_utils_cls is not None:
-        modules[
-            "worktop.core_services.app.utility.common_utils"
-        ].CommonUtils = common_utils_cls
+        "worktop.core_services.app.dao.models_config_dao"
+    ].ModelsConfigurationDAO = dao_cls
+    modules[
+        "worktop.core_services.app.gen_ai_models.model_client_factory"
+    ].ModelClientFactory = factory_cls
+    modules[
+        "worktop.core_services.app.utility.common_utils"
+    ].CommonUtils = common_utils_cls
 
     for name, module in modules.items():
         monkeypatch.setitem(sys.modules, name, module)
 
 
 class _StubProviderClient:
-    """Provider client returned by DefaultLLMClient or the factory."""
+    """Provider client returned by ModelClientFactory."""
 
     def __init__(self, provider="anthropic", response="generated text"):
         self.provider = provider
@@ -116,28 +107,8 @@ class TestNormalizeTenantId:
 # Client construction wiring
 # --------------------------------------------------------------------------- #
 class TestClientConstruction:
-    def test_prefers_default_llm_client_and_captures_provider(self, monkeypatch):
-        created = {}
-
-        class FakeDefaultLLMClient(_StubProviderClient):
-            def __init__(self, db, tenant_id):
-                super().__init__(provider="anthropic")
-                created["db"] = db
-                created["tenant_id"] = tenant_id
-
-        _install_core_services(monkeypatch, default_client_cls=FakeDefaultLLMClient)
-
-        adapter = DefaultLLMClientAdapter(db="DB", tenant_id="42")
-
-        assert created == {"db": "DB", "tenant_id": 42}
-        assert adapter.provider == "anthropic"
-
-    def test_falls_back_to_direct_factory(self, monkeypatch):
+    def test_constructs_provider_through_direct_factory(self, monkeypatch):
         calls = {}
-
-        class BrokenDefaultLLMClient:
-            def __init__(self, db, tenant_id):
-                raise RuntimeError("DefaultLLMClient unavailable")
 
         class FakeCommonUtils:
             @staticmethod
@@ -161,7 +132,6 @@ class TestClientConstruction:
 
         _install_core_services(
             monkeypatch,
-            default_client_cls=BrokenDefaultLLMClient,
             dao_cls=FakeDAO,
             factory_cls=FakeFactory,
             common_utils_cls=FakeCommonUtils,
@@ -180,11 +150,7 @@ class TestClientConstruction:
         assert db == "DB"
         assert tenant_id == 42
 
-    def test_fallback_missing_provider_raises(self, monkeypatch):
-        class BrokenDefaultLLMClient:
-            def __init__(self, db, tenant_id):
-                raise RuntimeError("unavailable")
-
+    def test_missing_provider_raises(self, monkeypatch):
         class FakeCommonUtils:
             @staticmethod
             def load_model_info(db, tenant_id):
@@ -204,7 +170,6 @@ class TestClientConstruction:
 
         _install_core_services(
             monkeypatch,
-            default_client_cls=BrokenDefaultLLMClient,
             dao_cls=FakeDAO,
             factory_cls=FakeFactory,
             common_utils_cls=FakeCommonUtils,
@@ -255,16 +220,14 @@ class TestComplete:
         with pytest.raises(RuntimeError, match="LLM completion failed"):
             adapter.complete("prompt")
 
-    def test_generate_completion_fallback_to_complete(self):
+    def test_provider_must_implement_generate_completion(self):
         class ClientWithoutGenerate:
             def prepare_input(self, system_prompt, user_prompt):
                 return user_prompt
 
-            def complete(self, input_data):
-                return f"completed:{input_data}"
-
         adapter = _adapter_with_client(ClientWithoutGenerate())
-        assert adapter.complete("hi") == "completed:hi"
+        with pytest.raises(RuntimeError, match="LLM completion failed"):
+            adapter.complete("hi")
 
 
 # --------------------------------------------------------------------------- #
@@ -302,8 +265,9 @@ class TestExtractText:
         obj = types.SimpleNamespace(content=[{"type": "text", "text": "attrlist"}])
         assert self.adapter._extract_text(obj) == "attrlist"
 
-    def test_unknown_object_falls_back_to_str(self):
-        assert self.adapter._extract_text(12345) == "12345"
+    def test_unknown_object_is_rejected(self):
+        with pytest.raises(TypeError, match="supported text field"):
+            self.adapter._extract_text(12345)
 
 
 # --------------------------------------------------------------------------- #

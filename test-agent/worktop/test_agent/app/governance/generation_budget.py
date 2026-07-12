@@ -4,11 +4,9 @@ import logging
 from time import perf_counter
 
 from worktop.test_agent.app.config import settings
-from worktop.test_agent.app.logging_config import log_event
 from worktop.test_agent.app.schemas.generation_budget import BudgetLimits, BudgetReport, BudgetUsage
-from worktop.test_agent.utils.logging import get_logger
+from worktop.core_services.app.utility.custom_logger.logging import logger
 
-logger = get_logger(__name__)
 
 
 class BudgetExceededError(RuntimeError):
@@ -108,15 +106,7 @@ class GenerationBudget:
         if reason not in self._exceeded_thresholds:
             self._exceeded_thresholds.append(reason)
         report = self.report()
-        log_event(
-            logger,
-            logging.ERROR if self.enforcement_mode == "strict" else logging.WARNING,
-            "generation_budget",
-            "blocked" if self.enforcement_mode == "strict" else "review_required",
-            reason=reason,
-            enforcement_mode=self.enforcement_mode,
-            usage=report.usage.model_dump(),
-        )
+        logger.log(logging.ERROR if self.enforcement_mode == 'strict' else logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'generation_budget', 'blocked' if self.enforcement_mode == 'strict' else 'review_required', {'reason': reason, 'enforcement_mode': self.enforcement_mode, 'usage': report.usage.model_dump()})
         if self.enforcement_mode == "strict":
             raise BudgetExceededError(reason, report)
 
