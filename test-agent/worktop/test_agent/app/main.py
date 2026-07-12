@@ -21,6 +21,14 @@ app.include_router(job_router)
 app.include_router(event_router)
 
 
+@app.on_event("shutdown")
+async def _stop_generation_worker() -> None:
+    # Best-effort; a no-op when the platform task-manager runtime is absent.
+    from worktop.test_agent.app.runtime import scriptgen_runtime
+
+    scriptgen_runtime.stop_scriptgen_worker()
+
+
 @app.exception_handler(UnsupportedRepositoryError)
 async def unsupported_repository_handler(
     request: Request,
