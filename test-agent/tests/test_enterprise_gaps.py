@@ -669,7 +669,9 @@ class TestGenerationManifest:
 
 class TestGenerationBudget:
     def test_llm_calls_beyond_limit_escalate(self) -> None:
-        budget = GenerationBudget(limits=BudgetLimits(max_llm_calls=2))
+        budget = GenerationBudget(
+            limits=BudgetLimits(max_llm_calls=2), enforcement_mode="strict"
+        )
 
         budget.charge_llm_call(prompt_chars=100)
         budget.charge_llm_call(prompt_chars=100)
@@ -706,7 +708,9 @@ class TestGenerationBudget:
         assert report.usage.elapsed_seconds >= 0.0
 
     def test_exploration_loop_charges_repository_reads(self, tmp_path: Path) -> None:
-        budget = GenerationBudget(limits=BudgetLimits(max_repository_reads=1))
+        budget = GenerationBudget(
+            limits=BudgetLimits(max_repository_reads=1), enforcement_mode="strict"
+        )
 
         class ScriptedClient:
             def complete_structured(self, prompt: str, response_model: type):
@@ -732,13 +736,28 @@ class TestGenerationBudget:
 
     def test_time_budget_escalates(self) -> None:
         budget = GenerationBudget(
-            limits=BudgetLimits(max_generation_seconds=0.0)
+            limits=BudgetLimits(max_generation_seconds=0.0),
+            enforcement_mode="strict",
         )
 
         with pytest.raises(BudgetExceededError) as excinfo:
             budget.charge_tool_call()
 
         assert "elapsed" in str(excinfo.value)
+
+    def test_review_mode_records_overage_without_blocking_generation(self) -> None:
+        budget = GenerationBudget(
+            limits=BudgetLimits(max_llm_calls=1), enforcement_mode="review"
+        )
+
+        budget.charge_llm_call(prompt_chars=100)
+        budget.charge_llm_call(prompt_chars=200)
+        report = budget.report()
+
+        assert report.review_required is True
+        assert report.enforcement_mode == "review"
+        assert report.usage.llm_calls == 2
+        assert any("llm_calls used 2 of 1" in reason for reason in report.exceeded_thresholds)
 
 
 class TestWorkspaceIsolation:

@@ -105,6 +105,7 @@ class PlaywrightUiIntelligenceService:
                 len(context.mock_patterns),
                 len(context.auth_session_patterns),
             )
+            self._log_strategy_report(context, repo_profile)
             return context
         except Exception as exc:
             logger.exception(
@@ -113,6 +114,81 @@ class PlaywrightUiIntelligenceService:
                 exc,
             )
             raise
+
+    def _log_strategy_report(
+        self,
+        context: PlaywrightUiContext,
+        repo_profile: RepoProfile,
+    ) -> dict[str, str]:
+        """Emit a structured report of *why* the auth/network/mock strategy was
+        chosen, so greenfield runs (no existing tests) are auditable from logs.
+
+        This does not change generation behavior — it records the evidence basis
+        so a reader can see whether a decision came from existing tests, from app
+        source, or from a best-practices fallback.
+        """
+        greenfield = not context.existing_spec_patterns
+
+        if context.existing_spec_patterns:
+            evidence_tier = "existing_tests"
+        elif context.routes or context.auth_session_patterns or context.mock_patterns:
+            evidence_tier = "source_only"
+        else:
+            evidence_tier = "none"
+
+        # Auth basis
+        auth_kinds = sorted({p.kind for p in context.auth_session_patterns})
+        if auth_kinds:
+            auth_basis = f"reuse_detected:{','.join(auth_kinds)}"
+        elif greenfield:
+            auth_basis = "best_practices_fallback:storageState_or_login_flow_to_generate"
+        else:
+            auth_basis = "undetermined:no_auth_signal_in_tests_or_source"
+
+        # Network basis (REST vs GraphQL vs mixed) from detected routes/endpoints
+        route_paths = " ".join(r.path for r in context.routes).lower()
+        has_graphql = "graphql" in route_paths or any(
+            "graphql" in (m.kind or "").lower() or "graphql" in (m.endpoint_or_handler or "").lower()
+            for m in context.mock_patterns
+        )
+        has_rest = "/api" in route_paths or bool(
+            re.search(r"/v\d", route_paths)
+        )
+        if has_rest and has_graphql:
+            network_basis = "mixed_rest_and_graphql_detected"
+        elif has_graphql:
+            network_basis = "graphql_detected"
+        elif has_rest:
+            network_basis = "rest_detected"
+        else:
+            network_basis = "no_network_endpoints_detected"
+
+        # Mock basis
+        mock_kinds = sorted({p.kind for p in context.mock_patterns})
+        if mock_kinds:
+            mock_basis = f"reuse_detected:{','.join(mock_kinds)}"
+        else:
+            mock_basis = "no_mocks_detected:real_or_stage_unless_story_requires"
+
+        report = {
+            "greenfield": str(greenfield).lower(),
+            "requires_bootstrap": str(getattr(repo_profile, "requires_bootstrap", False)).lower(),
+            "evidence_tier": evidence_tier,
+            "auth_basis": auth_basis,
+            "network_basis": network_basis,
+            "mock_basis": mock_basis,
+            "existing_specs": str(len(context.existing_spec_patterns)),
+            "routes": str(len(context.routes)),
+        }
+        logger.info(
+            "[playwright-generation] stage=strategy_report "
+            "greenfield=%(greenfield)s requires_bootstrap=%(requires_bootstrap)s "
+            "evidence_tier=%(evidence_tier)s auth_basis=%(auth_basis)s "
+            "network_basis=%(network_basis)s mock_basis=%(mock_basis)s "
+            "existing_specs=%(existing_specs)s routes=%(routes)s",
+            report,
+        )
+        return report
 
     def _candidate_files(self, root: Path) -> list[Path]:
         suffixes = {".ts", ".tsx", ".html", ".jsx", ".js", ".mjs", ".cjs"}

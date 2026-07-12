@@ -18,6 +18,13 @@
             <span class="sidebar__badge">{{ item.badge }}</span>
           }
         </a>
+        @if (item.children?.length) {
+          <ul class="sidebar__children">
+            @for (child of item.children; track child.routerLink) {
+              <li><a [routerLink]="child.routerLink" routerLinkActive="sidebar__child--active" class="sidebar__child"><i [class]="child.icon"></i><span>{{ child.label }}</span></a></li>
+            }
+          </ul>
+        }
       </li>
     }
   </ul>

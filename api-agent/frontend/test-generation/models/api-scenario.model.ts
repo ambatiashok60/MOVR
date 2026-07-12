@@ -1,5 +1,10 @@
 export type ExecutionTarget = 'ci' | 'stage' | 'both';
 
+export interface ApiScenarioDependencyRef {
+  label: string;
+  kind: 'database' | 'authentication' | 'service' | 'other';
+}
+
 export interface ApiScenario {
   api_scenario_id: string;
   scenario_name: string;
@@ -12,6 +17,9 @@ export interface ApiScenario {
   reason: string;
   scenario_steps: string[];
   assertions: string[];
+  /** BACKEND CONTRACT: structured dependencies (DB, Auth, downstream services)
+   *  the scenario needs — drives the Dependencies badges in the table. */
+  dependencies?: ApiScenarioDependencyRef[];
 }
 
 export interface GenerateApiScenariosRequest {

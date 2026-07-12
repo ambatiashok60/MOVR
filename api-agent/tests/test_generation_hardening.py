@@ -3,22 +3,22 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from app.llm.worktop_model_client_adapter import WorktopModelClientAdapter
-from app.prompts.api_scenario_prompt import build_api_scenario_prompt
-from app.prompts.api_test_code_prompt import build_api_test_code_prompt
-from app.schemas.api_scenario import ApiScenario
-from app.schemas.api_scenario_request import GenerateApiScenariosRequest
-from app.schemas.api_test_generation_request import GenerateApiTestCodeRequest
-from app.schemas.execution_target import ExecutionTarget
-from app.schemas.llm_outputs import (
+from worktop.api_agent.app.llm.worktop_model_client_adapter import WorktopModelClientAdapter
+from worktop.api_agent.app.prompts.api_scenario_prompt import build_api_scenario_prompt
+from worktop.api_agent.app.prompts.api_test_code_prompt import build_api_test_code_prompt
+from worktop.api_agent.app.schemas.api_scenario import ApiScenario
+from worktop.api_agent.app.schemas.api_scenario_request import GenerateApiScenariosRequest
+from worktop.api_agent.app.schemas.api_test_generation_request import GenerateApiTestCodeRequest
+from worktop.api_agent.app.schemas.execution_target import ExecutionTarget
+from worktop.api_agent.app.schemas.llm_outputs import (
     GeneratedTestFileOutput,
     ScenarioPlanOutput,
     TestCodeOutput,
 )
-from app.schemas.repo_profile import ApiEndpointCandidate, RepoProfile
-from app.services.api_scenario_generation_service import ApiScenarioGenerationService
-from app.services.api_test_code_generation_service import ApiTestCodeGenerationService
-from app.validation.generated_file_guard import GeneratedFileGuard
+from worktop.api_agent.app.schemas.repo_profile import ApiEndpointCandidate, RepoProfile
+from worktop.api_agent.app.services.api_scenario_generation_service import ApiScenarioGenerationService
+from worktop.api_agent.app.services.api_test_code_generation_service import ApiTestCodeGenerationService
+from worktop.api_agent.app.validation.generated_file_guard import GeneratedFileGuard
 
 
 def _scenario(**overrides) -> ApiScenario:
@@ -310,7 +310,7 @@ def test_service_falls_back_to_strategy_skeleton_when_all_rejected(tmp_path) -> 
 # --------------------------------------------------------------- phase 9
 
 def test_scaffold_scenario_fallback_sets_needs_review() -> None:
-    from app.schemas.llm_outputs import ScenarioPlanOutput
+    from worktop.api_agent.app.schemas.llm_outputs import ScenarioPlanOutput
 
     output = ScenarioPlanOutput(
         scenarios=[_scenario()],
@@ -323,7 +323,7 @@ def test_scaffold_scenario_fallback_sets_needs_review() -> None:
 
 
 def test_guard_accepts_path_matching_existing_test_directory(tmp_path) -> None:
-    from app.schemas.repo_profile import ExistingApiTestCandidate
+    from worktop.api_agent.app.schemas.repo_profile import ExistingApiTestCandidate
 
     guard = GeneratedFileGuard()
     profile = _profile()
@@ -346,7 +346,7 @@ def test_guard_accepts_path_matching_existing_test_directory(tmp_path) -> None:
 
 
 def test_discovery_agent_concludes_from_turns(tmp_path) -> None:
-    from app.agents.repo_discovery_agent import RepoDiscoveryAgent
+    from worktop.api_agent.app.agents.repo_discovery_agent import RepoDiscoveryAgent
 
     (tmp_path / "package.json").write_text('{"name": "svc"}', encoding="utf-8")
 
@@ -381,7 +381,7 @@ def test_discovery_agent_concludes_from_turns(tmp_path) -> None:
 
 
 def test_discovery_agent_returns_none_on_failure(tmp_path) -> None:
-    from app.agents.repo_discovery_agent import RepoDiscoveryAgent
+    from worktop.api_agent.app.agents.repo_discovery_agent import RepoDiscoveryAgent
 
     class BrokenLLM:
         def complete_structured(self, prompt, response_model):
@@ -391,7 +391,7 @@ def test_discovery_agent_returns_none_on_failure(tmp_path) -> None:
 
 
 def test_prompts_render_repo_understanding() -> None:
-    from app.schemas.repo_understanding import RepoUnderstanding
+    from worktop.api_agent.app.schemas.repo_understanding import RepoUnderstanding
 
     understanding = RepoUnderstanding(
         languages=["kotlin"],
@@ -465,10 +465,10 @@ def test_scenario_agent_explores_then_concludes(tmp_path) -> None:
                 {"requests": [], "output": {"scenarios": [], "warnings": ["explored"]}}
             )
 
-    from app.agents.scenario_agent import ScenarioAgent
+    from worktop.api_agent.app.agents.scenario_agent import ScenarioAgent
 
     agent = ScenarioAgent(llm_client=FakeLLM())
-    output = agent.generate(
+    agent.generate(
         GenerateApiScenariosRequest(
             user_story_hierarchy_id=1, repo_path=str(tmp_path)
         ),
@@ -500,7 +500,7 @@ def test_stage_scenario_kept_when_stage_infra_exists() -> None:
 
 
 def test_mock_emission_gap_flagged(tmp_path) -> None:
-    from app.schemas.mock_stub_plan import MockStubPlan
+    from worktop.api_agent.app.schemas.mock_stub_plan import MockStubPlan
 
     guard = GeneratedFileGuard()
     plan = MockStubPlan.model_validate(
@@ -530,7 +530,7 @@ def test_mock_emission_gap_flagged(tmp_path) -> None:
 
 
 def test_mock_emission_gap_triggers_healing_regeneration(tmp_path) -> None:
-    from app.schemas.mock_stub_plan import MockStubPlan
+    from worktop.api_agent.app.schemas.mock_stub_plan import MockStubPlan
 
     plan = MockStubPlan.model_validate(
         {"dependencies_to_mock": [{"name": "PaymentClient", "dependency_kind": "client",

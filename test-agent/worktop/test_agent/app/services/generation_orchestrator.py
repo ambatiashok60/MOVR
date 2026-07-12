@@ -431,6 +431,13 @@ class GenerationOrchestrator:
                 ),
             )
 
+            budget_report = budget.report()
+            if budget_report.review_required:
+                for reason in budget_report.exceeded_thresholds:
+                    message = f"Budget estimate review: {reason}"
+                    if message not in review_reasons:
+                        review_reasons.append(message)
+
             review_report = self._run_optional_stage(
                 request.job_id,
                 "review_report",
@@ -476,7 +483,7 @@ class GenerationOrchestrator:
                     traceability=traceability_matrix,
                     review_report=review_report,
                     manifest=generation_manifest,
-                    budget=budget.report(),
+                    budget=budget_report,
                 ),
                 completed=lambda built: {
                     "files_changed": len(built.files_changed),

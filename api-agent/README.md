@@ -231,5 +231,9 @@ tested outside the full Worktop runtime.
 ```bash
 cd api-agent
 python -m compileall -q app
-uvicorn app.main:app --reload --port 8091
+uvicorn worktop.api_agent.app.main:app --reload --port 8091
 ```
+# Documentation
+
+- [`FUNCTIONAL_GUIDE.md`](FUNCTIONAL_GUIDE.md) — story-to-scenario and scenario-to-code behavior.
+- [`TECHNICAL_ARCHITECTURE.md`](TECHNICAL_ARCHITECTURE.md) — backend/frontend architecture, mocks and wiring.
