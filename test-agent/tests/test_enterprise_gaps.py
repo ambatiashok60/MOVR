@@ -847,6 +847,18 @@ class TestWorkspaceIsolation:
         assert reclaimed.job_id == "job-live"
         manager.release(reclaimed)
 
+    def test_lock_from_dead_process_is_reclaimed_immediately(self, tmp_path: Path) -> None:
+        manager = WorkspaceManager(workspace_root=str(tmp_path / "ws"))
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        manager.acquire("job-dead", str(repo))
+        manager._process_exists = lambda pid: False  # type: ignore[method-assign]
+
+        reclaimed = manager.acquire("job-live", str(repo))
+
+        assert reclaimed.job_id == "job-live"
+        manager.release(reclaimed)
+
 
 class TestIdempotency:
     def _request(self, job_id: str = "job-1") -> GenerationRequest:
