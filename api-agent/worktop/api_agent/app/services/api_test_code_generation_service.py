@@ -61,6 +61,8 @@ class ApiTestCodeGenerationService:
             mock_stub_plan,
             repo_understanding,
         )
+        if profile.generation_plan is not None:
+            review_reasons.extend(profile.generation_plan.review_reasons)
         if not output.files:
             output = self._fallback_output(request, profile, output)
         if any("SCAFFOLD" in warning for warning in output.warnings) or (

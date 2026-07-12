@@ -1572,3 +1572,74 @@ def test_spec_placement_agent_explores_before_deciding(tmp_path) -> None:
     )
     assert agent.llm.calls == 2
     assert decision.target_spec_file == "tests/plans.spec.ts"
+
+
+def test_strategy_report_greenfield_no_evidence() -> None:
+    from worktop.test_agent.app.schemas.playwright_ui_context import PlaywrightUiContext
+    from worktop.test_agent.app.schemas.repo_profile import RepoProfile
+    from worktop.test_agent.app.services.playwright_ui_intelligence_service import (
+        PlaywrightUiIntelligenceService,
+    )
+
+    svc = PlaywrightUiIntelligenceService()
+    report = svc._log_strategy_report(
+        PlaywrightUiContext(),
+        RepoProfile(repo_path="/tmp/repo", requires_bootstrap=True),
+    )
+    assert report["greenfield"] == "true"
+    assert report["evidence_tier"] == "none"
+    assert report["auth_basis"].startswith("best_practices_fallback")
+    assert report["network_basis"] == "no_network_endpoints_detected"
+    assert report["mock_basis"].startswith("no_mocks_detected")
+
+
+def test_strategy_report_source_only_mixed_network() -> None:
+    from worktop.test_agent.app.schemas.playwright_ui_context import (
+        AuthSessionEvidence,
+        MockPatternEvidence,
+        PlaywrightUiContext,
+        UiRouteEvidence,
+    )
+    from worktop.test_agent.app.schemas.repo_profile import RepoProfile
+    from worktop.test_agent.app.services.playwright_ui_intelligence_service import (
+        PlaywrightUiIntelligenceService,
+    )
+
+    ctx = PlaywrightUiContext(
+        routes=[
+            UiRouteEvidence(path="/api/orders", file_path="src/routes.ts"),
+            UiRouteEvidence(path="/graphql", file_path="src/apollo.ts"),
+        ],
+        auth_session_patterns=[
+            AuthSessionEvidence(kind="storage_state", file_path="src/auth.ts")
+        ],
+        mock_patterns=[
+            MockPatternEvidence(kind="msw_or_network_handler", file_path="src/mocks.ts")
+        ],
+    )
+    svc = PlaywrightUiIntelligenceService()
+    report = svc._log_strategy_report(ctx, RepoProfile(repo_path="/tmp/repo"))
+    assert report["greenfield"] == "true"  # no existing specs
+    assert report["evidence_tier"] == "source_only"
+    assert report["auth_basis"] == "reuse_detected:storage_state"
+    assert report["network_basis"] == "mixed_rest_and_graphql_detected"
+    assert report["mock_basis"].startswith("reuse_detected:")
+
+
+def test_strategy_report_existing_tests_tier() -> None:
+    from worktop.test_agent.app.schemas.playwright_ui_context import (
+        ExistingSpecPattern,
+        PlaywrightUiContext,
+    )
+    from worktop.test_agent.app.schemas.repo_profile import RepoProfile
+    from worktop.test_agent.app.services.playwright_ui_intelligence_service import (
+        PlaywrightUiIntelligenceService,
+    )
+
+    ctx = PlaywrightUiContext(
+        existing_spec_patterns=[ExistingSpecPattern(file_path="tests/plans.spec.ts")]
+    )
+    svc = PlaywrightUiIntelligenceService()
+    report = svc._log_strategy_report(ctx, RepoProfile(repo_path="/tmp/repo"))
+    assert report["greenfield"] == "false"
+    assert report["evidence_tier"] == "existing_tests"

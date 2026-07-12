@@ -7,6 +7,7 @@ export interface NavItem {
   icon: string;
   routerLink: string;
   badge?: string;
+  children?: NavItem[];
 }
 
 // TODO integration: replace with the host app's real nav config (app-constants.ts or similar)
@@ -18,7 +19,15 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Prompt Management', icon: 'pi pi-file-edit', routerLink: '/prompt-management' },
   { label: 'Coverage', icon: 'pi pi-chart-bar', routerLink: '/coverage' },
   { label: 'Review Management', icon: 'pi pi-verified', routerLink: '/review-management' },
-  { label: 'Test Gen', icon: 'pi pi-shield', routerLink: '/test-generation' },
+  {
+    label: 'Test Gen',
+    icon: 'pi pi-shield',
+    routerLink: '/test-generation',
+    children: [
+      { label: 'Functional Tests', icon: 'pi pi-desktop', routerLink: '/test-generation/functional-tests' },
+      { label: 'API Tests', icon: 'pi pi-code', routerLink: '/test-generation/api-tests' },
+    ],
+  },
   { label: 'AI Workspace', icon: 'pi pi-sparkles', routerLink: '/ai-workspace', badge: 'BETA' },
 ];
 

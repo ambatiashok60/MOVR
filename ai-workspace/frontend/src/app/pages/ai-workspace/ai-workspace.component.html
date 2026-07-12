@@ -1,11 +1,7 @@
 <div class="ai-workspace">
+  <div class="ai-workspace__ambient" aria-hidden="true"></div>
   <header class="ai-workspace__header">
-    <app-workspace-header
-      [workspaceName]="facade.store.selectedRepository()?.name || ''"
-      [mode]="facade.store.mode()"
-      [modelName]="facade.store.bootstrap()?.models?.runtime?.selectedModelId"
-      [syncedAt]="facade.store.selectedBranch()?.syncedAt"
-    />
+    <div class="ai-workspace__heading"><span class="ai-workspace__eyebrow"><i class="pi pi-sparkles"></i> Engineering intelligence</span><app-workspace-header [workspaceName]="facade.store.selectedRepository()?.name || ''" [mode]="facade.store.mode()" [modelName]="facade.store.bootstrap()?.models?.runtime?.selectedModelId" [syncedAt]="facade.store.selectedBranch()?.syncedAt" /></div>
 
     <div class="ai-workspace__selectors">
       <p-dropdown
@@ -22,22 +18,12 @@
         (ngModelChange)="onBranchChange($event)"
         placeholder="Select branch"
       />
-      <p-button label="Refresh" icon="pi pi-refresh" [outlined]="true" (onClick)="refresh()" />
+      <p-button label="Sync" icon="pi pi-refresh" [outlined]="true" (onClick)="refresh()" />
       <p-button icon="pi pi-cog" [text]="true" (onClick)="facade.toggleSettings()" />
     </div>
   </header>
 
-  <app-workspace-selector
-    class="ai-workspace__path-entry"
-    [workspace]="facade.store.workspace()"
-    (pathSubmitted)="facade.validateWorkspacePath($event)"
-  />
-
-  <app-mode-toggle
-    class="ai-workspace__mode-toggle"
-    [mode]="facade.store.mode()"
-    (modeChange)="facade.setMode($event)"
-  />
+  <div class="ai-workspace__commandbar"><app-workspace-selector class="ai-workspace__path-entry" [workspace]="facade.store.workspace()" (pathSubmitted)="facade.validateWorkspacePath($event)" /><app-mode-toggle class="ai-workspace__mode-toggle" [mode]="facade.store.mode()" (modeChange)="facade.setMode($event)" /></div>
 
   <div class="ai-workspace__body">
     <aside class="ai-workspace__panel ai-workspace__panel--left">

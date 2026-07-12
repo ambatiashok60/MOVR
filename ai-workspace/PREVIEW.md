@@ -8,7 +8,7 @@ From `ai-workspace/backend`:
 AI_WORKSPACE_ALLOW_MOCK_LLM=true \
 AI_WORKSPACE_STATE_BACKEND=memory \
 AI_WORKSPACE_WORKSPACE_ROOT_ALLOWLIST='["/Users/ashokkumar/Documents/movr/MOVR"]' \
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+python -m uvicorn worktop.ai_workspace.app.main:app --host 127.0.0.1 --port 8000
 ```
 
 ## Frontend

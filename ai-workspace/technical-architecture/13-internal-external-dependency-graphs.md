@@ -38,7 +38,7 @@ Mock providers replace services at DI boundaries. Shared markdown/code/loading c
 ## Backend control and application graph
 
 ```text
-backend/app/main.py
+backend/worktop/ai_workspace/app/main.py
  -> api/routes/ai_workspace_routes.py
  -> session_routes.py + workspace_routes.py
  -> execution_routes.py + sse_routes.py

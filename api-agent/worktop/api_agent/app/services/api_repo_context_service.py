@@ -4,10 +4,14 @@ from pathlib import Path
 
 from worktop.api_agent.app.schemas.repo_profile import RepoProfile
 from worktop.api_agent.app.services.team_test_strategy_service import TeamTestStrategyService
+from worktop.api_agent.app.services.capability_assessment_service import CapabilityAssessmentService
+from worktop.api_agent.app.autonomy.workflow_controller import AutonomousDiscoveryWorkflowController
+from worktop.api_agent.app.autonomy.strategy_composer import CapabilityStrategyComposer
 from worktop.api_agent.app.tools.api_endpoint_scanner_tool import ApiEndpointScannerTool
 from worktop.api_agent.app.tools.existing_test_scanner_tool import ExistingTestScannerTool
 from worktop.api_agent.app.tools.path_safety import resolve_workspace_path
 from worktop.api_agent.app.utils.logging_utils import log_step
+from worktop.api_agent.app.config import settings
 
 
 class ApiRepoContextService:
@@ -15,6 +19,9 @@ class ApiRepoContextService:
         self.endpoint_scanner = ApiEndpointScannerTool()
         self.test_scanner = ExistingTestScannerTool()
         self.strategy_service = TeamTestStrategyService()
+        self.capability_assessment = CapabilityAssessmentService()
+        self.autonomous_discovery = AutonomousDiscoveryWorkflowController(self.capability_assessment)
+        self.strategy_composer = CapabilityStrategyComposer()
 
     def build(self, repo_path: str) -> RepoProfile:
         log_step("api_repo_context_started", {"repo_path": repo_path, "stage": "scanning_repository"})
@@ -35,6 +42,9 @@ class ApiRepoContextService:
         profile.contract_tools = profile.team_strategy.contract_tools
         profile.findings = self._findings(profile)
         profile.warnings = profile.team_strategy.warnings
+        if settings.enable_capability_discovery:
+            profile.capability_assessment = self.autonomous_discovery.run(profile)
+            profile.generation_plan = self.strategy_composer.compose(profile)
         return profile
 
     def _package_manager(self, root: Path) -> str | None:

@@ -1,13 +1,13 @@
-from app.ai_workspace.application.agent.agent_service import _parse_json_response, _parse_agent_turn
-from app.ai_workspace.application.agent.patch_validation_service import PatchValidationService
-from app.ai_workspace.application.review.engineering_review_service import EngineeringReviewService
-from app.common.data_governance import DataGovernanceService
-from app.llm.application.review_budget_service import ReviewBudgetService
-from app.repository.application.workspace_transaction_service import WorkspaceTransactionService, StaleProposalError
-from app.repository.application.file_write_service import FileWriteService
-from app.repository.infrastructure.local_file_writer import LocalFileWriter
-from app.ai_workspace.domain.file_change import FileChange, FileChangeStatus
-from app.ai_workspace.domain.review_decision import ReviewDecision
+from worktop.ai_workspace.app.ai_workspace.application.agent.agent_service import _parse_json_response, _parse_agent_turn
+from worktop.ai_workspace.app.ai_workspace.application.agent.patch_validation_service import PatchValidationService
+from worktop.ai_workspace.app.ai_workspace.application.review.engineering_review_service import EngineeringReviewService
+from worktop.ai_workspace.app.common.data_governance import DataGovernanceService
+from worktop.ai_workspace.app.llm.application.review_budget_service import ReviewBudgetService
+from worktop.ai_workspace.app.repository.application.workspace_transaction_service import WorkspaceTransactionService, StaleProposalError
+from worktop.ai_workspace.app.repository.application.file_write_service import FileWriteService
+from worktop.ai_workspace.app.repository.infrastructure.local_file_writer import LocalFileWriter
+from worktop.ai_workspace.app.ai_workspace.domain.file_change import FileChange, FileChangeStatus
+from worktop.ai_workspace.app.ai_workspace.domain.review_decision import ReviewDecision
 import hashlib
 import pytest
 

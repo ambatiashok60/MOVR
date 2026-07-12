@@ -20,10 +20,19 @@ export const routes: Routes = [
       },
       {
         path: 'test-generation',
-        loadComponent: () =>
-          import('./pages/test-generation/test-generation-page.component').then(
-            (m) => m.TestGenerationPageComponent,
-          ),
+        children: [
+          { path: '', redirectTo: 'functional-tests', pathMatch: 'full' },
+          {
+            path: 'functional-tests',
+            data: { testGenerationMode: 'functional' },
+            loadComponent: () => import('./pages/test-generation/test-generation-page.component').then((m) => m.TestGenerationPageComponent),
+          },
+          {
+            path: 'api-tests',
+            data: { testGenerationMode: 'api' },
+            loadComponent: () => import('./pages/test-generation/test-generation-page.component').then((m) => m.TestGenerationPageComponent),
+          },
+        ],
       },
     ],
   },

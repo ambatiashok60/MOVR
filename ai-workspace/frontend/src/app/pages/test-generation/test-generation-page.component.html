@@ -4,10 +4,10 @@
       <nav class="breadcrumb">
         <span>Test Gen</span>
         <i class="pi pi-angle-right"></i>
-        <strong>API Tests</strong>
+        <strong>{{ mode === 'api' ? 'API Tests' : 'Functional Tests' }}</strong>
       </nav>
       <p class="page-header__subtitle">
-        Generate API integration test scenarios and code (RestAssured / Spring Boot)
+        {{ mode === 'api' ? 'Generate API integration scenarios and code using repository-native frameworks.' : 'Generate Playwright functional test cases and repository-native code.' }}
       </p>
     </div>
     <div class="page-header__context">
@@ -67,7 +67,15 @@
     </table>
   </section>
 
-  <app-test-generation
+  <app-functional-test-gen
+    *ngIf="mode === 'functional'"
+    [selectedStory]="selectedStory()"
+    [tenantId]="1"
+    [repoPath]="repoPath()"
+    [branch]="branch()"
+  />
+  <app-api-test-gen
+    *ngIf="mode === 'api'"
     [selectedStory]="selectedStory()"
     [tenantId]="1"
     [repoPath]="repoPath()"

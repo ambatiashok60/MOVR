@@ -92,6 +92,19 @@ def _response_examples(model_name: str) -> str:
                 ]
             },
         ),
+        "StrategyReasoningOutput": (
+            {
+                "decision": "confirm",
+                "selected_strategy": "java_spring_webtestclient",
+                "confidence": 0.94,
+                "evidence_ids": ["ev-a1b2c3d4"],
+                "reasons": ["Existing WebTestClient tests match the reactive Spring source."],
+                "rejected_alternatives": [{"strategy_name": "java_spring_mockmvc", "reason": "The endpoint is reactive.", "incompatible_capabilities": ["spring_webflux"]}],
+                "unresolved_questions": [],
+                "recommended_next_stage": "dependency_planning",
+            },
+            {"decision": "yes", "selected_strategy": "invented-framework", "confidence": 5, "reasons": []},
+        ),
     }
     examples["DiscoveryTurn"] = (
         {
@@ -164,6 +177,18 @@ def render_repo_profile(profile: RepoProfile) -> str:
     strategy = profile.team_strategy
     strategy_reasons = "\n".join(f"- {reason}" for reason in strategy.reasons)
     strategy_warnings = "\n".join(f"- {warning}" for warning in strategy.warnings)
+    composed = profile.generation_plan
+    composed_summary = "- none"
+    if composed is not None:
+        substitutions = ", ".join(f"{item.dependency_capability}->{item.mechanism}" for item in composed.dependency_substitutions) or "none"
+        composed_summary = (
+            f"- selected: {composed.selected_strategy or 'unknown'}\n"
+            f"- status/confidence: {composed.status}/{composed.confidence}\n"
+            f"- bootstrap: {composed.bootstrap or 'unknown'}\n"
+            f"- inbound driver: {composed.inbound_driver or 'unknown'}\n"
+            f"- dependency substitutions: {substitutions}\n"
+            f"- review reasons: {'; '.join(composed.review_reasons) or 'none'}"
+        )
     return f"""
 Repository:
 - path: {profile.repo_path}
@@ -203,6 +228,9 @@ Strategy reasons:
 
 Strategy warnings:
 {strategy_warnings or '- none'}
+
+Capability-composed generation plan:
+{composed_summary}
 """.strip()
 
 

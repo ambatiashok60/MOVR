@@ -5,6 +5,8 @@ from typing import Any, Callable
 from worktop.api_agent.app.agents.repo_discovery_agent import RepoDiscoveryAgent
 from worktop.api_agent.app.agents.scenario_agent import ScenarioAgent
 from worktop.api_agent.app.agents.test_generation_agent import TestGenerationAgent
+from worktop.api_agent.app.agents.strategy_reasoning_agent import StrategyReasoningAgent
+from worktop.api_agent.app.config import settings
 from worktop.api_agent.app.errors import AbortRequestedError
 from worktop.api_agent.app.governance.generation_budget import (
     BudgetedLLMClient,
@@ -21,6 +23,7 @@ from worktop.api_agent.app.services.api_scenario_generation_service import ApiSc
 from worktop.api_agent.app.services.api_test_code_generation_service import ApiTestCodeGenerationService
 from worktop.api_agent.app.services.mock_stub_planning_service import MockStubPlanningService
 from worktop.api_agent.app.services.source_context_service import SourceContextService
+from worktop.api_agent.app.services.strategy_reasoning_service import StrategyReasoningService
 from worktop.api_agent.app.utils.logging_utils import log_exception, log_performance, log_step
 from worktop.api_agent.app.workspace.workspace_manager import WorkspaceManager
 
@@ -35,6 +38,7 @@ class GenerationOrchestrator:
         self.source_context = SourceContextService()
         self.mock_stub_planning = MockStubPlanningService()
         self.workspaces = WorkspaceManager()
+        self.strategy_reasoning = StrategyReasoningService()
 
     @log_performance("api_agent.generate_scenarios")
     def generate_scenarios(
@@ -175,7 +179,11 @@ class GenerationOrchestrator:
             repo_understanding = self._discover(llm_client, request.repo_path)
 
             self._check_abort(task_id, is_abort_requested)
-            publish("selecting_generation_strategy", "Selecting repository-native generation strategy", None)
+            reasoning = None
+            if settings.enable_strategy_reasoning_review and profile.generation_plan is not None:
+                publish("reviewing_strategy_evidence", "Reviewing capability evidence with a schema-constrained reasoning agent", {"selected_strategy": profile.generation_plan.selected_strategy, "candidates": [item.model_dump() for item in profile.generation_plan.candidates]})
+                reasoning = self.strategy_reasoning.review(profile, StrategyReasoningAgent(llm_client))
+            publish("selecting_generation_strategy", "Selecting repository-native generation strategy", {"capability_readiness": profile.capability_assessment.readiness.model_dump() if profile.capability_assessment else None, "generation_plan": profile.generation_plan.model_dump() if profile.generation_plan else None, "reasoning_review": reasoning.model_dump() if reasoning else None, "telemetry": profile.capability_assessment.telemetry.model_dump() if profile.capability_assessment and profile.capability_assessment.telemetry else None})
 
             self._check_abort(task_id, is_abort_requested)
             publish("generating_test_code", "Generating repository-native API tests", None)

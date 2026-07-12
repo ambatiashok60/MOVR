@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     budget_enforcement_mode: str = "review"
     workspace_root: str = "/tmp"
     workspace_stale_lock_seconds: float = 3600.0
+    enable_capability_discovery: bool = True
+    enable_strategy_reasoning_review: bool = True
+    allow_legacy_strategy_fallback: bool = True
+    capability_discovery_max_rounds: int = 2
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

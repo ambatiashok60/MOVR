@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from worktop.api_agent.app.schemas.autonomy import CapabilityAssessment
+from worktop.api_agent.app.schemas.strategy_composition import TestGenerationPlan
+
 
 class ApiEndpointCandidate(BaseModel):
     method: str
@@ -66,3 +69,5 @@ class RepoProfile(BaseModel):
     team_strategy: TeamTestStrategyProfile = Field(default_factory=TeamTestStrategyProfile)
     findings: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    capability_assessment: CapabilityAssessment | None = None
+    generation_plan: TestGenerationPlan | None = None

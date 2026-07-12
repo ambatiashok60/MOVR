@@ -26,3 +26,7 @@ Three primary graphs over one typed model — see [`dependency-graphs/`](depende
 
 The shared worker/SSE roadmap and its final documentation phase are in
 [`../../ASYNC_EXECUTION_IMPLEMENTATION_PLAN.md`](../../ASYNC_EXECUTION_IMPLEMENTATION_PLAN.md).
+The canonical three-view graph and DTO/component migration specification is in
+[`../../COMPONENT_MIGRATION_GRAPH_SPEC.md`](../../COMPONENT_MIGRATION_GRAPH_SPEC.md).
+Shared files, assets, generated contracts and test-resource migration are covered by
+[`../../SHARED_RESOURCES_MIGRATION_SPEC.md`](../../SHARED_RESOURCES_MIGRATION_SPEC.md).

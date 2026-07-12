@@ -227,7 +227,7 @@ back to standard Python logging under the `ai_workspace` logger name.
 
 This cannot simply be copied in as-is:
 
-1. **Do not run `app/main.py` as a second FastAPI app.** Import the routers
+1. **Do not run `worktop/ai_workspace/app/main.py` as a second FastAPI app.** Import the routers
    (`ai_workspace_routes.router`, `workspace_routes.router`, etc.) into the *existing* app's real
    `main.py` and `include_router()` them there, so AI Workspace shares the existing app's
    middleware, auth, and DB session setup.

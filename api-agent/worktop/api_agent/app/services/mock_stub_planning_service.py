@@ -20,6 +20,10 @@ class MockStubPlanningService:
     ) -> MockStubPlan:
         dependencies = self.dependency_scanner.scan(source_context.endpoint_sources)
         strategy = self.mock_scanner.detect_strategy(profile)
+        composed_plan = profile.generation_plan
+        webclient_substitution = next((item for item in (composed_plan.dependency_substitutions if composed_plan else []) if item.dependency_capability == "spring_webclient"), None)
+        if webclient_substitution is not None:
+            strategy = webclient_substitution.mechanism
         reused_helpers = self._reused_helpers(profile)
         generated_stubs = self._generated_stubs(strategy, dependencies)
         external_services = [
@@ -48,6 +52,8 @@ class MockStubPlanningService:
             f"{dep.dependency_kind} `{dep.name}` may require external infrastructure or credentials."
             for dep in high_risk
         ]
+        if webclient_substitution is not None and webclient_substitution.approval_required:
+            approval_reasons.extend(webclient_substitution.reasons)
         provisioning_actions = [
             f"Create an isolated test double/container for {dep.name}; never connect to production."
             for dep in high_risk
@@ -68,7 +74,7 @@ class MockStubPlanningService:
             external_services_to_stub=external_services,
             warnings=warnings,
             risk_level="high" if high_risk else ("medium" if dependencies else "low"),
-            approval_required=bool(high_risk),
+            approval_required=bool(high_risk) or bool(webclient_substitution and webclient_substitution.approval_required),
             approval_reasons=approval_reasons,
             runtime_signals=runtime_signals,
             provisioning_actions=provisioning_actions,
@@ -103,7 +109,7 @@ class MockStubPlanningService:
             if strategy == "mockito":
                 target = dep.name or "dependency"
                 stubs.append(f"when({target}....).thenReturn(...);")
-            elif strategy in {"wiremock", "respx", "responses"}:
+            elif strategy in {"wiremock", "mockwebserver", "respx", "responses"}:
                 stubs.append(f"Stub downstream call for {dep.name}.")
             elif strategy in {"pytest-mock", "pytest monkeypatch"}:
                 stubs.append(f"Patch or fixture override for {dep.name}.")
