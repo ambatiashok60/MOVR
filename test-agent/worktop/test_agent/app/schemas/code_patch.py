@@ -5,8 +5,8 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 PatchOperation = Literal[
-    "create", "replace", "append", "append_test", "replace_test", "insert_class_member",
-    "insert_object_property", "insert_import",
+    "create", "replace", "append", "append_test", "insert_test_after_anchor",
+    "replace_test", "insert_class_member", "insert_object_property", "insert_import",
 ]
 
 

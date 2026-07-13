@@ -21,10 +21,17 @@ class PlaywrightParserTool:
         re.DOTALL,
     )
 
-    def extract_tests(self, file_path: str, content: str) -> list[BehavioralTestUnit]:
+    def extract_tests(
+        self,
+        file_path: str,
+        content: str,
+        *,
+        source: str = "file",
+    ) -> list[BehavioralTestUnit]:
         logger.info(
-            "[playwright-generation] stage=playwright_parse status=started path=%s",
+            "[playwright-generation] stage=playwright_parse status=started path=%s source=%s",
             file_path,
+            source,
         )
         try:
             describes = self.extract_describes(file_path, content)
@@ -71,8 +78,9 @@ class PlaywrightParserTool:
                     )
                 )
             logger.info(
-                "[playwright-generation] stage=playwright_parse status=completed path=%s tests=%s",
+                "[playwright-generation] stage=playwright_parse status=completed path=%s source=%s tests=%s",
                 file_path,
+                source,
                 len(units),
             )
             return units
@@ -134,9 +142,14 @@ class PlaywrightParserTool:
                 continue
             if self._clean_title(match.group("title")) != describe_title:
                 continue
-            body_end = self._find_call_end_offset(content, match.end())
-            if body_end > match.end():
-                matches.append(body_end)
+            body_open = self._find_callback_body_offset(content, match.end())
+            if body_open == -1:
+                continue
+            body_close = self._find_matching_brace(
+                content, body_open, include_statement_tail=False
+            )
+            if body_close > body_open:
+                matches.append(body_close)
         if len(matches) != 1:
             raise ValueError(
                 f"Expected exactly one describe `{describe_title}` in {file_path}, "
@@ -348,7 +361,19 @@ class PlaywrightParserTool:
 
         return bool(quote or in_line_comment or in_block_comment)
 
-    def _find_matching_brace(self, content: str, open_offset: int) -> int:
+    def _find_matching_brace(
+        self,
+        content: str,
+        open_offset: int,
+        *,
+        include_statement_tail: bool = True,
+    ) -> int:
+        """Return the statement end past the matching brace.
+
+        With ``include_statement_tail=False``, return the offset of the
+        matching ``}`` itself — the insertion point for content that must land
+        inside the block.
+        """
         depth = 0
         quote: str | None = None
         escaped = False
@@ -401,6 +426,8 @@ class PlaywrightParserTool:
             elif char == "}":
                 depth -= 1
                 if depth == 0:
+                    if not include_statement_tail:
+                        return index
                     semicolon_offset = content.find(";", index)
                     if semicolon_offset != -1 and "\n" not in content[index:semicolon_offset]:
                         return semicolon_offset

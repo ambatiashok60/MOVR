@@ -84,6 +84,15 @@ class PlaywrightValidator:
                     passed=False,
                     output="\n".join(duplicate_messages),
                 )
+            outcome_messages = self._patch_outcome_messages(
+                relative_path, spec_patches[0], tests
+            )
+            if outcome_messages:
+                return ValidationCheck(
+                    name="playwright_structure",
+                    passed=False,
+                    output="\n".join(outcome_messages),
+                )
 
             logger.info("[playwright-generation] stage=playwright_validation status=completed")
             return ValidationCheck(
@@ -119,6 +128,38 @@ class PlaywrightValidator:
                 and "test(" in content
             )
         )
+
+    def _patch_outcome_messages(self, relative_path: str, patch, tests) -> list[str]:
+        """Verify the patched file actually contains the patch's intended test."""
+        if patch.operation in {"append", "append_test", "insert_test_after_anchor"}:
+            generated = self.parser.extract_tests(
+                relative_path, patch.content, source="generated_snippet"
+            )
+            if len(generated) != 1:
+                return []
+            unit = generated[0]
+            matching = [test for test in tests if test.test_title == unit.test_title]
+            if not matching:
+                return [
+                    f"Generated test '{unit.test_title}' was not found in patched "
+                    f"file {relative_path}."
+                ]
+            if (
+                patch.target_describe_title
+                and matching[0].describe_title != patch.target_describe_title
+            ):
+                return [
+                    f"Generated test '{unit.test_title}' landed outside target "
+                    f"describe '{patch.target_describe_title}' in {relative_path}."
+                ]
+            return []
+        if patch.operation == "replace_test" and patch.target_test_title:
+            if patch.target_test_title not in {test.test_title for test in tests}:
+                return [
+                    f"Replaced test '{patch.target_test_title}' is missing from "
+                    f"patched file {relative_path}."
+                ]
+        return []
 
     def _duplicate_title_messages(self, relative_path: str, tests) -> list[str]:
         titles = [test.test_title for test in tests]

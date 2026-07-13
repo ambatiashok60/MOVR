@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     enable_extended_reporting: bool = False
     validation_timeout_seconds: int = 120
     max_repair_attempts: int = 2
+    extension_resolution_agent_retries: int = 1
+    placement_resolution_agent_retries: int = 1
     min_placement_confidence: float = 0.5
     min_action_confidence: float = 0.5
     min_ownership_confidence: float = 0.5

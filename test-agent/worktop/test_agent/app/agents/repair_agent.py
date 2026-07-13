@@ -18,12 +18,14 @@ class RepairAgent(BaseAgent):
         validation: ValidationResult,
         anchor: AnchorFlowContext | None = None,
         locator_decisions: list[LocatorDecision] | None = None,
+        history: list[str] | None = None,
     ) -> PatchSet:
         context = self.log_start("repair")
         try:
             return self.complete_structured(
                 prompt=build_repair_prompt(
-                    patches, validation, anchor, locator_decisions
+                    patches, validation, anchor, locator_decisions,
+                    attempt_history=history,
                 ),
                 response_model=PatchSet,
             )

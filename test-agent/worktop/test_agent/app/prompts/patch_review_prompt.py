@@ -13,9 +13,17 @@ def build_repair_prompt(
     validation: ValidationResult,
     anchor: AnchorFlowContext | None = None,
     locator_decisions: list[LocatorDecision] | None = None,
+    attempt_history: list[str] | None = None,
 ) -> str:
+    if attempt_history:
+        history_section = "\n".join(f"- {entry}" for entry in attempt_history)
+    else:
+        history_section = "- None; this is the first repair attempt."
     return f"""
 You are repairing generated Playwright patches after validation failure.
+
+Previous repair attempts and why they failed (do NOT repeat these mistakes):
+{history_section}
 
 Rules:
 - Fix only generated patch scope.
@@ -24,7 +32,7 @@ Rules:
 - Repair parser, line-range, describe-placement, duplicate-title, and anchor-boundary failures in the patch instead of changing the intended scenario.
 - When validation reports a duplicate test title, rename only the generated test to a concise behavior-specific title that is absent from the target spec. Preserve its body, operation, path, and structural target.
 - For extension repairs, preserve every existing step and assertion and keep the exact parser-validated target range.
-- For append repairs, preserve append_test and target_describe_title, keep the selected anchor flow uninterrupted, retain its boundary comments, and return exactly one complete test block.
+- For append repairs, preserve the operation (append_test or insert_test_after_anchor) plus its target_describe_title/target_test_title, keep the selected anchor flow uninterrupted, retain its boundary comments, and return exactly one complete test block.
 - For supporting page or utility patches, preserve insert_class_member, insert_object_property, or insert_import plus target_symbol/member_name so the writer can re-resolve the current structural insertion point.
 
 Current patches:

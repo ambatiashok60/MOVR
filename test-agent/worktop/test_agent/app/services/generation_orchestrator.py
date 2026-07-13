@@ -230,7 +230,15 @@ class GenerationOrchestrator:
             placement = self._run_stage(
                 request.job_id,
                 "spec_placement",
-                lambda: spec_placement.decide(inventory, intent, ui_context),
+                lambda: self._decide_placement_with_retry(
+                    request,
+                    spec_placement,
+                    inventory,
+                    intent,
+                    ui_context,
+                    repo_profile,
+                    review_reasons,
+                ),
                 completed=lambda decision: {
                     "target": decision.target_spec_file,
                     "create_new": decision.create_new,
@@ -239,7 +247,6 @@ class GenerationOrchestrator:
                 },
             )
 
-            placement = self._normalize_bootstrap_placement(repo_profile, placement)
             target_behavior = self._behavior_for_placement(placement, behavior)
             logger.info(
                 "[playwright-generation] stage=context_scope status=selected "
@@ -273,20 +280,32 @@ class GenerationOrchestrator:
                 "test_action", action.decision_trace, review_reasons
             )
 
-            existing_test_context = self._run_stage(
+            action, existing_test_context = self._run_stage(
                 request.job_id,
                 "existing_test_context",
-                lambda: self._resolve_existing_test_context(
-                    placement, action, target_behavior
+                lambda: self._resolve_extension_target_with_retry(
+                    request,
+                    placement,
+                    action,
+                    target_behavior,
+                    test_action,
+                    intent,
+                    ui_context,
+                    review_reasons,
                 ),
-                completed=lambda target: {
-                    "selected": target is not None,
-                    "file": target.file_path if target else "none",
-                    "test_title": target.test_title if target else "none",
-                    "lines": f"{target.start_line}-{target.end_line}" if target else "none",
+                completed=lambda outcome: {
+                    "action": outcome[0].action,
+                    "selected": outcome[1] is not None,
+                    "file": outcome[1].file_path if outcome[1] else "none",
+                    "test_title": outcome[1].test_title if outcome[1] else "none",
+                    "lines": f"{outcome[1].start_line}-{outcome[1].end_line}" if outcome[1] else "none",
                 },
             )
-            action = self._ensure_safe_extension_action(action, existing_test_context)
+            action = self._ensure_safe_extension_action(
+                action,
+                existing_test_context,
+                reason="existing_test_resolution_failed_after_retry",
+            )
 
             anchor_flow_context = self._run_stage(
                 request.job_id,
@@ -687,6 +706,7 @@ class GenerationOrchestrator:
     ) -> tuple[PatchWriteResult, ValidationResult | None, PatchSet]:
         patch_result = PatchWriteResult()
         max_attempts = max(settings.max_repair_attempts, 0)
+        repair_history: list[str] = []
         logger.info(
             "[playwright-generation] stage=patch_integration context "
             "target_paths=%s operations=%s extension_target=%s anchor=%s describe=%s",
@@ -724,19 +744,25 @@ class GenerationOrchestrator:
                 max_attempts=max_attempts,
                 policy=policy,
                 budget=budget,
+                history=repair_history,
             )
             if validation is not None and not validation.passed:
                 return patch_result, validation, patches
 
-        patch_result = self._write_patches(request, patches, attempt=0, workspace=workspace)
+        try:
+            patch_result = self._write_patches(
+                request, patches, attempt=0, workspace=workspace
+            )
+        except ValueError as exc:
+            validation = self._patch_write_failure(request, exc, attempt=0)
+        else:
+            if not request.run_validation:
+                self._log_stage(request.job_id, "validation", "skipped")
+                return patch_result, None, patches
 
-        if not request.run_validation:
-            self._log_stage(request.job_id, "validation", "skipped")
-            return patch_result, None, patches
-
-        validation = self._validate_patches(request, patches, ui_context, attempt=0)
-        if validation.passed:
-            return patch_result, validation, patches
+            validation = self._validate_patches(request, patches, ui_context, attempt=0)
+            if validation.passed:
+                return patch_result, validation, patches
 
         for attempt in range(1, max_attempts + 1):
             if budget is not None:
@@ -753,8 +779,9 @@ class GenerationOrchestrator:
             repaired_patches = self._run_stage(
                 request.job_id,
                 "repair_generation",
-                lambda current=patches, failed=validation: repair.repair(
-                    current, failed, anchor_flow_context, locator_decisions
+                lambda current=patches, failed=validation, past=list(repair_history): repair.repair(
+                    current, failed, anchor_flow_context, locator_decisions,
+                    history=past,
                 ),
                 started={"attempt": attempt},
                 completed=lambda patch_set: {
@@ -762,6 +789,11 @@ class GenerationOrchestrator:
                     "patches": len(patch_set.patches),
                     "paths": [patch.path for patch in patch_set.patches],
                 },
+            )
+            repair_history.append(
+                self._summarize_validation_failure(
+                    f"write/validation attempt {attempt}", validation
+                )
             )
             patches = self._run_stage(
                 request.job_id,
@@ -789,9 +821,18 @@ class GenerationOrchestrator:
             if not plan_validation.passed:
                 validation = plan_validation
                 continue
-            patch_result = self._write_patches(
-                request, patches, attempt=attempt, workspace=workspace
-            )
+            try:
+                patch_result = self._write_patches(
+                    request, patches, attempt=attempt, workspace=workspace
+                )
+            except ValueError as exc:
+                validation = self._patch_write_failure(request, exc, attempt=attempt)
+                validation.repair_attempted = True
+                patch_result = PatchWriteResult()
+                continue
+            if not request.run_validation:
+                self._log_stage(request.job_id, "validation", "skipped")
+                return patch_result, None, patches
             validation = self._validate_patches(request, patches, ui_context, attempt=attempt)
             validation.repair_attempted = True
             if validation.passed:
@@ -862,11 +903,290 @@ class GenerationOrchestrator:
             ui_context=ui_context,
         )
 
+    def _validate_placement(self, placement: Any, repo_path: str) -> str | None:
+        """Structurally validate a placement decision against the live workspace.
+
+        Returns a failure reason, or None when the placement is actionable.
+        """
+        target_file = placement.target_spec_file or ""
+        if not target_file:
+            return "placement did not select a target spec file"
+        target = Path(repo_path) / target_file
+        if placement.create_new:
+            if target.is_file():
+                return (
+                    f"create_new placement targets a spec file that already exists: "
+                    f"{target_file}"
+                )
+            return None
+        if not target.is_file():
+            return (
+                f"placement targets a spec file that does not exist: {target_file}"
+            )
+        tests = self._parse_spec_tests(repo_path, target_file)
+        describes = PlaywrightParserTool().extract_describes(
+            target_file,
+            target.read_text(encoding="utf-8", errors="ignore"),
+        )
+        if not tests and not describes:
+            return (
+                f"placement target contains no tests or describe blocks, so "
+                f"append/extend is impossible: {target_file}"
+            )
+        return None
+
+    def _describe_placement_attempt(self, placement: Any, reason: str) -> str:
+        return (
+            f"you selected target='{placement.target_spec_file}' "
+            f"create_new={placement.create_new}; validation failed: {reason}"
+        )
+
+    def _build_placement_feedback(
+        self,
+        reason: str,
+        inventory: Any,
+        history: list[str] | None = None,
+    ) -> str:
+        spec_paths = [file.path for file in getattr(inventory, "test_files", [])]
+        if spec_paths:
+            listing = "\n".join(f"- {path}" for path in spec_paths)
+            available = f"Spec files that actually exist in the repository:\n{listing}"
+        else:
+            available = "No spec files exist in the repository yet."
+        return (
+            f"{self._format_attempt_history(history or [])}"
+            f"The previous placement failed structural validation: {reason}.\n"
+            f"{available}\n"
+            "Select one of the listed existing spec files (create_new=false), or "
+            "a genuinely new path that does not exist yet (create_new=true)."
+        )
+
+    def _decide_placement_with_retry(
+        self,
+        request: GenerationRequest,
+        spec_placement: Any,
+        inventory: Any,
+        intent: Any,
+        ui_context: Any,
+        repo_profile: Any,
+        review_reasons: list[str],
+    ) -> Any:
+        """Decide spec placement, retrying the agent with structural feedback.
+
+        Bootstrap repos skip validation: normalization already forces a new spec
+        under the scaffolded testDir, so the target legitimately does not exist.
+        On retry exhaustion the original decision is kept and flagged for review
+        rather than hard-failing — downstream reconcile/guard stages absorb it.
+        """
+        placement = spec_placement.decide(inventory, intent, ui_context)
+        placement = self._normalize_bootstrap_placement(repo_profile, placement)
+        if getattr(repo_profile, "requires_bootstrap", False):
+            return placement
+
+        failure = self._validate_placement(placement, request.repo_path)
+        if failure is None:
+            return placement
+
+        original = placement
+        attempt_history: list[str] = [
+            self._describe_placement_attempt(placement, failure)
+        ]
+        retries = max(settings.placement_resolution_agent_retries, 0)
+        for attempt in range(1, retries + 1):
+            feedback = self._build_placement_feedback(
+                failure, inventory, attempt_history
+            )
+            logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'spec_placement', 'retrying_decision_with_feedback', {'attempt': attempt, 'max_attempts': retries, 'reason': failure})
+            placement = spec_placement.decide(
+                inventory, intent, ui_context, feedback=feedback
+            )
+            placement = self._normalize_bootstrap_placement(repo_profile, placement)
+            failure = self._validate_placement(placement, request.repo_path)
+            if failure is None:
+                logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'spec_placement', 'recovered_via_feedback', {'attempt': attempt, 'target': placement.target_spec_file, 'create_new': placement.create_new})
+                return placement
+            attempt_history.append(
+                self._describe_placement_attempt(placement, failure)
+            )
+
+        review_reasons.append(
+            f"Spec placement could not be structurally validated after retry: {failure}"
+        )
+        logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'spec_placement', 'placement_validation_failed_after_retry', {'attempts': retries, 'reason': failure, 'target': original.target_spec_file, 'create_new': original.create_new})
+        return original
+
+    def _format_attempt_history(self, history: list[str]) -> str:
+        if not history:
+            return ""
+        listing = "\n".join(
+            f"- Attempt {index}: {entry}" for index, entry in enumerate(history, start=1)
+        )
+        return (
+            "Previous attempts and why they failed (do NOT repeat these):\n"
+            f"{listing}\n"
+        )
+
+    def _describe_extension_attempt(self, action: TestActionDecision) -> str:
+        return (
+            f"you returned action={action.action} "
+            f"title='{action.target_test_title or 'none'}' "
+            f"file='{action.target_file_path or 'none'}' "
+            f"start_line={action.target_start_line}; it could not be resolved "
+            "against the parser-validated test inventory."
+        )
+
+    def _build_resolution_feedback(
+        self,
+        action: TestActionDecision,
+        placement: Any,
+        parsed_units: list[BehavioralTestUnit],
+        history: list[str] | None = None,
+    ) -> str:
+        requested = (
+            "Requested extend target could not be structurally resolved: "
+            f"title='{action.target_test_title or 'none'}' "
+            f"file='{action.target_file_path or placement.target_spec_file or 'none'}' "
+            f"start_line={action.target_start_line}."
+        )
+        if parsed_units:
+            listing = "\n".join(
+                f"- {unit.file_path} :: '{unit.test_title}' "
+                f"(lines {unit.start_line}-{unit.end_line}, "
+                f"describe='{unit.describe_title or '<root>'}')"
+                for unit in parsed_units
+            )
+            available = (
+                "Parser-validated tests available in the target spec:\n" + listing
+            )
+        else:
+            available = "The parser found no tests in the requested target file."
+        return (
+            f"{self._format_attempt_history(history or [])}"
+            f"{requested}\n{available}\n"
+            "Return an extend target that matches one of the parser-validated "
+            "tests exactly (title, file, start line), or choose append/create "
+            "instead."
+        )
+
+    def _resolve_extension_target_with_retry(
+        self,
+        request: GenerationRequest,
+        placement: Any,
+        action: TestActionDecision,
+        target_behavior: list[BehavioralTestUnit],
+        test_action: TestActionService,
+        intent: Any,
+        ui_context: Any,
+        review_reasons: list[str],
+    ) -> tuple[TestActionDecision, ExistingTestContext | None]:
+        """Resolve the extend target, retrying the decision agent with feedback.
+
+        Attempt 1 matches static candidates, attempt 2 re-parses the target
+        file (both inside ``_resolve_existing_test_context``). Only when both
+        fail is the decision agent re-invoked with structured feedback, and
+        only within the configured retry budget.
+        """
+        context = self._resolve_existing_test_context(
+            placement, action, target_behavior, request.repo_path
+        )
+        if context is not None or action.action != TestActions.EXTEND_EXISTING_TEST:
+            return action, context
+
+        attempt_history: list[str] = [self._describe_extension_attempt(action)]
+        retries = max(settings.extension_resolution_agent_retries, 0)
+        for attempt in range(1, retries + 1):
+            parsed_units = self._parse_spec_tests(
+                request.repo_path,
+                action.target_file_path or placement.target_spec_file,
+            )
+            feedback = self._build_resolution_feedback(
+                action, placement, parsed_units, attempt_history
+            )
+            logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'existing_test_context', 'retrying_decision_with_feedback', {'attempt': attempt, 'max_attempts': retries, 'target_test': action.target_test_title or 'none', 'target_file': action.target_file_path or 'none'})
+            action = test_action.decide(
+                placement,
+                target_behavior,
+                intent,
+                ui_context,
+                request.repo_path,
+                feedback=feedback,
+            )
+            action = self._reconcile_action_with_placement(placement, action)
+            action = self._gate_action_confidence(action, review_reasons)
+            if action.action != TestActions.EXTEND_EXISTING_TEST:
+                return action, None
+            context = self._resolve_existing_test_context(
+                placement, action, target_behavior, request.repo_path
+            )
+            if context is not None:
+                return action, context
+            attempt_history.append(self._describe_extension_attempt(action))
+
+        logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'existing_test_context', 'resolution_failed_after_retry', {'attempts': retries, 'target_test': action.target_test_title or 'none', 'target_file': action.target_file_path or 'none'})
+        return action, None
+
+    def _parse_spec_tests(
+        self,
+        repo_path: str,
+        file_path: str | None,
+    ) -> list[BehavioralTestUnit]:
+        """Parse one spec file from the live workspace into behavioral units."""
+        if not file_path:
+            return []
+        target = Path(repo_path) / file_path
+        if not target.is_file():
+            return []
+        return PlaywrightParserTool().extract_tests(
+            file_path,
+            target.read_text(encoding="utf-8", errors="ignore"),
+        )
+
+    def _reparse_extension_target(
+        self,
+        action: Any,
+        repo_path: str,
+        fallback_file: str | None,
+    ) -> BehavioralTestUnit | None:
+        """Resolve the agent-selected extend target against a fresh parse.
+
+        The static behavioral inventory can miss tests the decision agent
+        discovered through live repository exploration, so the target file is
+        re-parsed deterministically: line containment first, normalized title
+        second. Ambiguous matches stay unresolved rather than guessed.
+        """
+        target_file = action.target_file_path or fallback_file
+        units = self._parse_spec_tests(repo_path, target_file)
+        if not units:
+            return None
+        target_start = action.target_start_line
+        if target_start is not None:
+            containing = [
+                unit
+                for unit in units
+                if unit.start_line <= target_start <= unit.end_line
+            ]
+            if len(containing) == 1:
+                return containing[0]
+        normalized_title = self._normalize_test_title(action.target_test_title)
+        if not normalized_title:
+            return None
+        titled = [
+            unit
+            for unit in units
+            if self._normalize_test_title(unit.test_title) == normalized_title
+        ]
+        if len(titled) == 1:
+            return titled[0]
+        if titled and target_start is not None:
+            return min(titled, key=lambda unit: abs(unit.start_line - target_start))
+        return None
+
     def _resolve_existing_test_context(
         self,
         placement: Any,
         action: Any,
         candidates: list[BehavioralTestUnit],
+        repo_path: str = "",
     ) -> ExistingTestContext | None:
         if action.action != TestActions.EXTEND_EXISTING_TEST:
             logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'existing_test_context', 'skipped', {'action': action.action})
@@ -890,12 +1210,15 @@ class GenerationOrchestrator:
             )
             and (target_start is None or candidate.start_line == target_start)
         ]
-        if not matches:
-            logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'existing_test_context', 'missing', {'target_spec': normalized_target or 'none', 'target_test': target_title or 'none', 'target_file': normalized_action_file or 'none', 'target_start_line': target_start, 'available_tests': [(candidate.file_path, candidate.test_title, candidate.start_line) for candidate in candidates]})
-            return None
-
-        selected = matches[0]
-        logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'existing_test_context', 'selected', {'file': selected.file_path, 'test_title': selected.test_title, 'lines': f'{selected.start_line}-{selected.end_line}'})
+        if matches:
+            selected = matches[0]
+            logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'existing_test_context', 'selected', {'file': selected.file_path, 'test_title': selected.test_title, 'lines': f'{selected.start_line}-{selected.end_line}'})
+        else:
+            selected = self._reparse_extension_target(action, repo_path, target_spec)
+            if selected is None:
+                logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'existing_test_context', 'missing', {'target_spec': normalized_target or 'none', 'target_test': target_title or 'none', 'target_file': normalized_action_file or 'none', 'target_start_line': target_start, 'available_tests': [(candidate.file_path, candidate.test_title, candidate.start_line) for candidate in candidates]})
+                return None
+            logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'existing_test_context', 'recovered_via_reparse', {'file': selected.file_path, 'test_title': selected.test_title, 'lines': f'{selected.start_line}-{selected.end_line}', 'requested_title': target_title or 'none', 'requested_start_line': target_start})
 
         return ExistingTestContext(
             file_path=selected.file_path,
@@ -1127,10 +1450,7 @@ class GenerationOrchestrator:
             if not target.is_file():
                 logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'anchor_flow_context', 'target_missing', {'target_spec': placement.target_spec_file})
                 return None
-            pool = PlaywrightParserTool().extract_tests(
-                placement.target_spec_file,
-                target.read_text(encoding="utf-8", errors="ignore"),
-            )
+            pool = self._parse_spec_tests(repo_path, placement.target_spec_file)
             if not pool:
                 logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'anchor_flow_context', 'no_tests_in_target_spec', {'target_spec': placement.target_spec_file})
                 return None
@@ -1178,6 +1498,8 @@ class GenerationOrchestrator:
             file_path=anchor.file_path,
             describe_title=anchor.describe_title,
             anchor_test_title=anchor.test_title,
+            start_line=anchor.start_line,
+            end_line=anchor.end_line,
             fixtures=anchor.fixtures,
             page_objects=anchor.page_objects,
             behavior_summary=anchor.behavior_summary,
@@ -1189,6 +1511,7 @@ class GenerationOrchestrator:
         self,
         action: TestActionDecision,
         existing_test_context: ExistingTestContext | None,
+        reason: str = "no_valid_existing_test_context",
     ) -> TestActionDecision:
         if (
             action.action != TestActions.EXTEND_EXISTING_TEST
@@ -1196,7 +1519,7 @@ class GenerationOrchestrator:
         ):
             return action
 
-        logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'existing_test_context', 'downgraded_action', {'from_action': action.action, 'to_action': 'append_new_test', 'reason': 'no_valid_existing_test_context'})
+        logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'existing_test_context', 'downgraded_action', {'from_action': action.action, 'to_action': 'append_new_test', 'reason': reason})
         return TestActionDecision(
             action=TestActions.APPEND_NEW_TEST,
             target_test_title=None,
@@ -1211,6 +1534,7 @@ class GenerationOrchestrator:
                 evidence=[
                     "Action requested extend_existing_test",
                     "No valid ExistingTestContext survived parser integrity checks",
+                    f"Downgrade reason: {reason}",
                 ],
                 risk="medium",
                 fallback="Append a new test in the selected spec instead of editing an unsafe range.",
@@ -1264,9 +1588,17 @@ class GenerationOrchestrator:
         requires_bootstrap: bool = False,
         policy: RepositoryPolicy | None = None,
     ) -> ValidationResult:
-        self._bind_append_to_anchor_describe(patches, anchor_flow_context, repo_path)
+        anchor_binding_failure = self._bind_append_to_anchor_describe(
+            patches, anchor_flow_context, repo_path
+        )
         self._bind_extension_target(patches, existing_test_context, repo_path)
         checks = [
+            ValidationCheck(
+                name="anchor_binding",
+                passed=anchor_binding_failure is None,
+                output=anchor_binding_failure
+                or "Anchor binding resolved structurally or was not required.",
+            ),
             self._extension_patch_check(patches, existing_test_context, flow_plan),
             self._append_integration_check(patches, repo_path, anchor_flow_context),
             self._append_reuse_check(patches, anchor_flow_context),
@@ -1308,7 +1640,7 @@ class GenerationOrchestrator:
         append_patches = [
             patch
             for patch in patches.patches
-            if patch.operation in {"append", "append_test"}
+            if patch.operation in {"append", "append_test", "insert_test_after_anchor"}
             and (anchor is None or patch.path == anchor.file_path)
             and patch.path.endswith((".spec.ts", ".spec.tsx", ".test.ts", ".test.tsx", ".e2e.ts", ".e2e.tsx"))
         ]
@@ -1350,7 +1682,19 @@ class GenerationOrchestrator:
             patch.path,
             path.read_text(encoding="utf-8"),
         )
-        if patch.operation == "append_test":
+        if patch.operation == "insert_test_after_anchor":
+            try:
+                parser.find_test_block(
+                    patch.path,
+                    path.read_text(encoding="utf-8"),
+                    patch.target_test_title or "",
+                    patch.target_describe_title,
+                )
+            except ValueError as exc:
+                findings.append(
+                    f"insert_test_after_anchor anchor is unresolvable: {exc}"
+                )
+        elif patch.operation == "append_test":
             matching_describes = [
                 block
                 for block in describes
@@ -1382,30 +1726,69 @@ class GenerationOrchestrator:
         patches: PatchSet,
         anchor: AnchorFlowContext | None,
         repo_path: str,
-    ) -> None:
+    ) -> str | None:
+        """Bind the append patch to the anchor's structural position.
+
+        Prefers inserting directly after the anchor test; falls back to the
+        anchor's describe block when the anchor test cannot be resolved. The
+        patch is only mutated once a structural target is confirmed. Returns a
+        failure reason when neither target resolves.
+        """
         if anchor is None:
-            return
+            return None
         append_patches = [
             patch
             for patch in patches.patches
-            if patch.operation in {"append", "append_test"} and patch.path == anchor.file_path
+            if patch.operation in {"append", "append_test", "insert_test_after_anchor"}
+            and patch.path == anchor.file_path
         ]
         if len(append_patches) != 1:
-            return
+            return None
         patch = append_patches[0]
-        patch.operation = "append_test"
-        patch.target_describe_title = anchor.describe_title
-        patch.start_line = None
         path = Path(repo_path) / patch.path
         if not path.is_file():
-            return
-        describes = PlaywrightParserTool().extract_describes(
-            patch.path,
-            path.read_text(encoding="utf-8", errors="ignore"),
-        )
-        matching = [block for block in describes if block.title == anchor.describe_title]
-        if len(matching) != 1:
-            return
+            return f"Anchor target file does not exist for structural binding: {patch.path}"
+        live = path.read_text(encoding="utf-8", errors="ignore")
+        parser = PlaywrightParserTool()
+        try:
+            parser.find_test_block(
+                patch.path,
+                live,
+                anchor.anchor_test_title,
+                anchor.describe_title,
+            )
+        except ValueError as exc:
+            describes = parser.extract_describes(patch.path, live)
+            matching = [
+                block for block in describes if block.title == anchor.describe_title
+            ]
+            if anchor.describe_title and len(matching) == 1:
+                patch.operation = "append_test"
+                patch.target_test_title = None
+                patch.target_describe_title = anchor.describe_title
+                patch.start_line = None
+                logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'anchor_binding', 'fell_back_to_describe', {'path': patch.path, 'anchor_test': anchor.anchor_test_title, 'describe': anchor.describe_title, 'reason': str(exc)})
+                return None
+            if len(describes) == 1:
+                patch.operation = "append_test"
+                patch.target_test_title = None
+                patch.target_describe_title = describes[0].title
+                patch.start_line = None
+                logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'anchor_binding', 'rebound_to_sole_describe', {'path': patch.path, 'anchor_test': anchor.anchor_test_title, 'describe': describes[0].title, 'reason': str(exc)})
+                return None
+            live_tests = parser.extract_tests(patch.path, live)
+            return (
+                f"Anchor test '{anchor.anchor_test_title}' in {patch.path} could not "
+                f"be structurally resolved and no unique fallback describe exists: {exc}. "
+                f"Live describe blocks: {[block.title for block in describes] or 'none'}. "
+                f"Live test titles: {[unit.test_title for unit in live_tests] or 'none'}."
+            )
+        patch.operation = "insert_test_after_anchor"
+        patch.target_test_title = anchor.anchor_test_title
+        patch.target_describe_title = anchor.describe_title
+        patch.start_line = None
+        logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'anchor_binding', 'bound_to_anchor_offsets', {'path': patch.path, 'anchor_test': anchor.anchor_test_title, 'describe': anchor.describe_title or '<root>'})
+        return None
 
     def _bind_extension_target(
         self,
@@ -1872,7 +2255,9 @@ class GenerationOrchestrator:
         requires_bootstrap: bool = False,
         policy: RepositoryPolicy | None = None,
         budget: GenerationBudget | None = None,
+        history: list[str] | None = None,
     ) -> tuple[PatchSet, ValidationResult | None]:
+        history = history if history is not None else []
         for attempt in range(1, max_attempts + 1):
             if budget is not None:
                 budget.charge_repair_attempt()
@@ -1880,8 +2265,9 @@ class GenerationOrchestrator:
             repaired_patches = self._run_stage(
                 request.job_id,
                 "repair_generation",
-                lambda current=patches, failed=validation: repair.repair(
-                    current, failed, anchor_flow_context, locator_decisions
+                lambda current=patches, failed=validation, past=list(history): repair.repair(
+                    current, failed, anchor_flow_context, locator_decisions,
+                    history=past,
                 ),
                 started={"attempt": attempt, "reason": "patch_plan_guard"},
                 completed=lambda patch_set: {
@@ -1889,6 +2275,11 @@ class GenerationOrchestrator:
                     "patches": len(patch_set.patches),
                     "paths": [patch.path for patch in patch_set.patches],
                 },
+            )
+            history.append(
+                self._summarize_validation_failure(
+                    f"plan-guard attempt {attempt}", validation
+                )
             )
             patches = self._run_stage(
                 request.job_id,
@@ -1921,6 +2312,42 @@ class GenerationOrchestrator:
         logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'repair_loop', 'plan_exhausted', {'job_id': request.job_id, 'attempts': max_attempts, 'passed': False})
         validation.repair_attempted = max_attempts > 0
         return patches, validation
+
+    def _summarize_validation_failure(
+        self,
+        label: str,
+        validation: ValidationResult,
+    ) -> str:
+        failed = [
+            f"{check.name}: {check.output[:300]}"
+            for check in validation.checks
+            if not check.passed
+        ]
+        return f"[{label}] " + ("; ".join(failed) if failed else "unknown failure")
+
+    def _patch_write_failure(
+        self,
+        request: GenerationRequest,
+        exc: ValueError,
+        attempt: int,
+    ) -> ValidationResult:
+        """Convert a recoverable writer failure into repairable validation feedback.
+
+        The scoped patch writer is transactional: a ValueError means nothing was
+        written to disk, so the failure can enter the repair loop instead of
+        aborting the job.
+        """
+        logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'patch_write', 'recoverable_failure', {'job_id': request.job_id, 'attempt': attempt, 'error': str(exc)})
+        return ValidationResult(
+            passed=False,
+            checks=[
+                ValidationCheck(
+                    name="patch_write",
+                    passed=False,
+                    output=str(exc),
+                )
+            ],
+        )
 
     def _write_patches(
         self,

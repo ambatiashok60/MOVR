@@ -1650,7 +1650,7 @@ class FakeRepair:
         self.repaired = repaired
 
     def repair(
-        self, patches: PatchSet, validation: ValidationResult, anchor=None, locator_decisions=None
+        self, patches: PatchSet, validation: ValidationResult, anchor=None, locator_decisions=None, history=None
     ) -> PatchSet:
         return self.repaired
 

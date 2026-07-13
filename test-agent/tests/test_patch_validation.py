@@ -75,10 +75,12 @@ test.describe('anchor suite', () => {
         source_excerpt="test('anchor flow', async () => {});",
     )
 
-    GenerationOrchestrator.__new__(GenerationOrchestrator)._bind_append_to_anchor_describe(
-        patches, anchor, str(tmp_path)
-    )
-    assert patches.patches[0].operation == "append_test"
+    failure = GenerationOrchestrator.__new__(
+        GenerationOrchestrator
+    )._bind_append_to_anchor_describe(patches, anchor, str(tmp_path))
+    assert failure is None
+    assert patches.patches[0].operation == "insert_test_after_anchor"
+    assert patches.patches[0].target_test_title == "anchor flow"
     assert patches.patches[0].target_describe_title == "anchor suite"
     assert patches.patches[0].start_line is None
     ScopedPatchWriter().apply(str(tmp_path), patches)
@@ -86,6 +88,7 @@ test.describe('anchor suite', () => {
     content = path.read_text(encoding="utf-8")
     anchor_suite = content[content.index("anchor suite") :]
     assert "new branch" in anchor_suite
+    assert anchor_suite.index("anchor flow") < anchor_suite.index("new branch")
 
 
 def test_append_test_resolves_fresh_structural_describe_offset(tmp_path: Path) -> None:
@@ -282,6 +285,231 @@ def test_invalid_supporting_patch_writes_nothing(tmp_path: Path) -> None:
         ScopedPatchWriter().apply(str(tmp_path), patches)
 
     assert page.read_text(encoding="utf-8") == original
+
+
+ANCHOR_SPEC = """import { test } from '@playwright/test';
+test.describe('anchor suite', () => {
+  test('anchor flow', async () => {});
+
+  test('later sibling', async () => {});
+});
+"""
+
+
+def test_insert_test_after_anchor_inserts_directly_after_anchor_block(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "tests" / "plans.spec.ts"
+    path.parent.mkdir()
+    path.write_text(ANCHOR_SPEC, encoding="utf-8")
+    patches = PatchSet(
+        patches=[
+            CodePatch(
+                path="tests/plans.spec.ts",
+                operation="insert_test_after_anchor",
+                target_test_title="anchor flow",
+                target_describe_title="anchor suite",
+                content="  test('new branch', async () => {});",
+            )
+        ]
+    )
+
+    ScopedPatchWriter().apply(str(tmp_path), patches)
+
+    content = path.read_text(encoding="utf-8")
+    assert content.index("anchor flow") < content.index("new branch")
+    assert content.index("new branch") < content.index("later sibling")
+    assert PlaywrightValidator().validate(str(tmp_path), patches).passed
+
+
+def test_insert_test_after_anchor_rejects_unresolvable_anchor(tmp_path: Path) -> None:
+    path = tmp_path / "tests" / "plans.spec.ts"
+    path.parent.mkdir()
+    path.write_text(ANCHOR_SPEC, encoding="utf-8")
+    patches = PatchSet(
+        patches=[
+            CodePatch(
+                path="tests/plans.spec.ts",
+                operation="insert_test_after_anchor",
+                target_test_title="anchor flow",
+                target_describe_title="a different suite",
+                content="  test('new branch', async () => {});",
+            )
+        ]
+    )
+
+    with pytest.raises(ValueError, match="Expected exactly one test"):
+        ScopedPatchWriter().apply(str(tmp_path), patches)
+
+    assert path.read_text(encoding="utf-8") == ANCHOR_SPEC
+
+
+def test_bind_falls_back_to_describe_when_anchor_unresolvable(tmp_path: Path) -> None:
+    path = tmp_path / "tests" / "plans.spec.ts"
+    path.parent.mkdir()
+    path.write_text(ANCHOR_SPEC, encoding="utf-8")
+    patches = _append_patch("new branch")
+    anchor = AnchorFlowContext(
+        file_path="tests/plans.spec.ts",
+        describe_title="anchor suite",
+        anchor_test_title="a renamed anchor that no longer exists",
+    )
+
+    failure = GenerationOrchestrator.__new__(
+        GenerationOrchestrator
+    )._bind_append_to_anchor_describe(patches, anchor, str(tmp_path))
+
+    assert failure is None
+    assert patches.patches[0].operation == "append_test"
+    assert patches.patches[0].target_describe_title == "anchor suite"
+
+
+TWO_DESCRIBE_SPEC = """import { test } from '@playwright/test';
+test.describe('first suite', () => {
+  test('first flow', async () => {});
+});
+test.describe('second suite', () => {
+  test('second flow', async () => {});
+});
+"""
+
+
+def test_unresolvable_anchor_is_blocking_plan_guard_failure(tmp_path: Path) -> None:
+    path = tmp_path / "tests" / "plans.spec.ts"
+    path.parent.mkdir()
+    path.write_text(TWO_DESCRIBE_SPEC, encoding="utf-8")
+    patches = _append_patch("new branch")
+    anchor = AnchorFlowContext(
+        file_path="tests/plans.spec.ts",
+        describe_title="a suite that does not exist",
+        anchor_test_title="a test that does not exist",
+    )
+    orchestrator = GenerationOrchestrator.__new__(GenerationOrchestrator)
+
+    failure = orchestrator._bind_append_to_anchor_describe(
+        patches, anchor, str(tmp_path)
+    )
+    assert failure is not None
+    assert "could not be structurally resolved" in failure
+    assert "first suite" in failure and "second suite" in failure
+    assert "first flow" in failure and "second flow" in failure
+
+    result = orchestrator._patch_plan_check(
+        patches,
+        existing_test_context=None,
+        anchor_flow_context=anchor,
+        flow_plan=None,
+        repo_path=str(tmp_path),
+    )
+    anchor_check = next(
+        check for check in result.checks if check.name == "anchor_binding"
+    )
+    assert not anchor_check.passed
+    assert not result.passed
+
+
+def test_unresolvable_anchor_rebinds_to_sole_describe(tmp_path: Path) -> None:
+    path = tmp_path / "tests" / "plans.spec.ts"
+    path.parent.mkdir()
+    path.write_text(ANCHOR_SPEC, encoding="utf-8")
+    patches = _append_patch("new branch")
+    anchor = AnchorFlowContext(
+        file_path="tests/plans.spec.ts",
+        describe_title="a suite that does not exist",
+        anchor_test_title="a test that does not exist",
+    )
+    orchestrator = GenerationOrchestrator.__new__(GenerationOrchestrator)
+
+    failure = orchestrator._bind_append_to_anchor_describe(
+        patches, anchor, str(tmp_path)
+    )
+    assert failure is None
+    assert patches.patches[0].operation == "append_test"
+    assert patches.patches[0].target_describe_title == "anchor suite"
+    assert patches.patches[0].target_test_title is None
+
+    second = orchestrator._bind_append_to_anchor_describe(
+        patches, anchor, str(tmp_path)
+    )
+    assert second is None
+    assert patches.patches[0].operation == "append_test"
+    assert patches.patches[0].target_describe_title == "anchor suite"
+
+    ScopedPatchWriter().apply(str(tmp_path), patches)
+    assert "new branch" in path.read_text(encoding="utf-8")
+
+
+def test_writer_structural_outcome_blocks_count_mismatch(tmp_path: Path) -> None:
+    writer = ScopedPatchWriter()
+    patch = CodePatch(
+        path="tests/plans.spec.ts",
+        operation="append_test",
+        target_describe_title="plans",
+        content="  test('vanished', async () => {});",
+    )
+
+    with pytest.raises(ValueError, match="structural_outcome"):
+        writer._assert_structural_outcome(patch, SPEC, SPEC)
+
+
+def test_writer_structural_outcome_blocks_replace_count_change(
+    tmp_path: Path,
+) -> None:
+    writer = ScopedPatchWriter()
+    patch = CodePatch(
+        path="tests/plans.spec.ts",
+        operation="replace_test",
+        target_test_title="opens a plan",
+        content="test('opens a plan', async () => {});",
+    )
+    after_with_extra = SPEC + "test('stray extra', async () => {});\n"
+
+    with pytest.raises(ValueError, match="structural_outcome"):
+        writer._assert_structural_outcome(patch, SPEC, after_with_extra)
+
+
+def test_validator_flags_missing_generated_title(tmp_path: Path) -> None:
+    path = tmp_path / "tests" / "plans.spec.ts"
+    path.parent.mkdir()
+    path.write_text(SPEC, encoding="utf-8")
+    patches = PatchSet(
+        patches=[
+            CodePatch(
+                path="tests/plans.spec.ts",
+                operation="append_test",
+                target_describe_title="plans",
+                content="  test('never actually written', async () => {});",
+            )
+        ]
+    )
+
+    check = PlaywrightValidator().validate(str(tmp_path), patches)
+
+    assert not check.passed
+    assert "never actually written" in check.output
+
+
+def test_validator_flags_generated_test_outside_target_describe(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "tests" / "plans.spec.ts"
+    path.parent.mkdir()
+    path.write_text(SPEC, encoding="utf-8")
+    patches = PatchSet(
+        patches=[
+            CodePatch(
+                path="tests/plans.spec.ts",
+                operation="append_test",
+                target_describe_title="a different suite",
+                content="  test('opens a plan', async () => {});",
+            )
+        ]
+    )
+
+    check = PlaywrightValidator().validate(str(tmp_path), patches)
+
+    assert not check.passed
+    assert "a different suite" in check.output
 
 
 def test_replace_test_resolves_fresh_structural_offsets(tmp_path: Path) -> None:
