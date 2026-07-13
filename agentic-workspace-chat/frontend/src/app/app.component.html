@@ -1,8 +1,9 @@
 <main class="shell">
   <header class="topbar">
     <div class="brand"><span class="mark">A</span><span>Arc</span><span class="tag">Workspace agent</span></div>
-    <div class="model"><span class="pulse"></span> Claude Sonnet 4.5 <span class="chevron">⌄</span></div>
+    <div class="header-actions"><button class="new-session" (click)="newSession()">＋ New session</button><button class="new-session" (click)="toggleSessions()">◷ Sessions</button><div class="model"><span class="pulse"></span>{{ runtime?.provider || 'Runtime' }} · {{ runtime?.model?.displayName || 'Loading model…' }}<span class="chevron">⌄</span></div></div>
   </header>
+  <div class="session-popover" *ngIf="sessionsOpen"><strong>Recent sessions</strong><button *ngFor="let item of sessions" (click)="reopenSession(item)">{{ item.id.slice(0, 8) }} · {{ item.updatedAt | date:'short' }}</button><small *ngIf="!sessions.length">No saved sessions</small></div>
 
   <section class="workspace-bar">
     <div class="pathbox">
@@ -13,10 +14,10 @@
     <div class="trust"><span>◆</span> Files stay on your machine</div>
   </section>
 
-  <section class="app-grid">
+  <section class="app-grid" [style.grid-template-columns]="sidebarWidth + 'px minmax(0, 1fr) 300px'">
     <aside class="sidebar">
       <div class="side-head">
-        <div><span class="eyebrow">WORKSPACE</span><strong>{{ workspace?.name || 'Not connected' }}</strong></div>
+        <div><span class="eyebrow">WORKSPACE</span><strong>{{ workspace?.name || 'Not connected' }}</strong><small class="workspace-status">{{ workspaceStatus }}</small></div>
         <span class="git" *ngIf="workspace">{{ workspace.isGit ? 'Git' : 'Folder' }}</span>
       </div>
       <div class="empty-files" *ngIf="!workspace">
@@ -24,16 +25,21 @@
         <p>Your file tree will appear here.</p>
       </div>
       <div class="file-list" *ngIf="workspace">
-        <label *ngFor="let file of files" [class.active]="selected.has(file)">
-          <input type="checkbox" [checked]="selected.has(file)" (change)="toggle(file)">
-          <span class="file-icon">▱</span><span class="file-name">{{ file }}</span>
-        </label>
+        <input class="tree-search" [(ngModel)]="fileQuery" placeholder="Search files…" aria-label="Search files">
+        <button class="tree-row" *ngFor="let node of visibleTree()" [style.padding-left.px]="10 + node.depth * 14" [class.active]="!node.directory && selected.has(node.path)" [title]="node.path" (click)="node.directory ? toggleFolder(node) : toggle(node.path)">
+          <span class="file-icon">{{ node.directory ? (node.expanded ? '⌄' : '›') : '▱' }}</span>
+          <input *ngIf="!node.directory" type="checkbox" [checked]="selected.has(node.path)" (click)="$event.stopPropagation()" (change)="toggle(node.path)">
+          <span class="file-name">{{ node.name }}</span>
+        </button>
       </div>
       <div class="context-count" *ngIf="workspace"><span>{{ selected.size }}</span> files in context</div>
+      <div class="sidebar-resizer" (pointerdown)="startResizeSidebar($event)" title="Resize sidebar"></div>
     </aside>
 
     <section class="chat">
-      <div class="messages">
+      <div class="messages" #messageScroll>
+        <div class="agent-plan" *ngIf="plan.length"><div class="eyebrow">AGENT PLAN</div><div class="plan-step" *ngFor="let item of plan"><span [class]="item.status">{{ item.status === 'completed' ? '✓' : item.status === 'in_progress' ? '●' : '○' }}</span>{{ item.step }}</div></div>
+        <div class="agent-plan relationship-map" *ngIf="relationships.length"><div class="eyebrow">EVIDENCE MAP</div><div class="relationship" *ngFor="let item of relationships"><code>{{item.path}}:{{item.line}}</code><span>{{item.text}}</span></div></div>
         <div class="welcome" *ngIf="messages.length === 1">
           <div class="orb"><span></span></div>
           <h1>What are we building?</h1>
@@ -46,20 +52,22 @@
         </div>
         <div class="message" *ngFor="let message of messages.slice(1)" [class.user]="message.role === 'user'">
           <span class="avatar">{{ message.role === 'user' ? 'Y' : 'A' }}</span>
-          <div>{{ message.text }}</div>
+          <div *ngIf="message.role === 'assistant'; else userMessage" [innerHTML]="message.html"></div>
+          <ng-template #userMessage><div>{{ message.text }}<div class="message-context" *ngIf="message.contextFiles?.length"><span *ngFor="let file of message.contextFiles">⌁ {{ file }}</span></div></div></ng-template>
         </div>
-        <div class="thinking" *ngIf="busy && workspace"><i></i><i></i><i></i> Working through your workspace</div>
+        <div class="thinking" *ngIf="busy && workspace"><i></i><i></i><i></i> Working through your workspace <button (click)="stop()">Stop</button></div>
         <div class="tool-trace" *ngIf="toolEvents.length">
           <span *ngFor="let event of toolEvents">{{ event.status === 'success' ? '✓' : '!' }} {{ event.tool }}</span>
         </div>
       </div>
 
-      <div class="error" *ngIf="error">{{ error }}</div>
+      <div class="error" *ngIf="error">{{ error }} <button *ngIf="failedPrompt" (click)="retry()">Retry</button></div>
       <div class="composer" [class.disabled]="!workspace">
-        <textarea [(ngModel)]="prompt" (keydown.meta.enter)="send()" rows="3"
+        <div class="context-chips" *ngIf="selected.size"><button *ngFor="let file of selected" (click)="removeSelected(file)" [title]="file">{{ file.split('/').pop() }} ×</button></div>
+        <textarea [(ngModel)]="prompt" (keydown)="handleComposerKeydown($event)" rows="3"
           [disabled]="!workspace" placeholder="Ask Arc to inspect, explain, or change your workspace…"></textarea>
         <div class="compose-actions">
-          <div class="tools"><button title="Attach files">＋</button><span>⌘ Enter to send</span></div>
+          <div class="tools"><button title="Attach files">＋</button><select [(ngModel)]="agentMode" title="Agent mode"><option value="debug">Debug</option><option value="analyze">Analyze</option><option value="migrate">Migrate</option><option value="refactor">Refactor</option><option value="tests">Tests</option></select><select [(ngModel)]="responseDetail" title="Response detail"><option value="auto">Auto detail</option><option value="brief">Brief</option><option value="detailed">Detailed</option></select><span>Enter to send · Shift+Enter for newline</span></div>
           <button class="send" (click)="send()" [disabled]="!workspace || !prompt.trim() || busy">↑</button>
         </div>
       </div>
@@ -90,6 +98,7 @@
             <span>{{ change.path }}</span>
           </button>
         </div>
+        <div class="hunk-list" *ngIf="proposal.changes[activeDiff].hunks?.length"><label *ngFor="let hunk of proposal.changes[activeDiff].hunks"><input type="checkbox" [checked]="acceptedHunks[proposal.changes[activeDiff].path]?.has(hunk.id)" (change)="toggleHunk(proposal.changes[activeDiff].path, hunk.id)"><code>{{hunk.header}}</code></label></div>
         <pre class="diff">{{ proposal.changes[activeDiff].diff }}</pre>
         <div class="review-actions">
           <button class="discard" (click)="proposal=undefined; accepted.clear()">Discard</button>

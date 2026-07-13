@@ -189,6 +189,10 @@ Minimum edit tools:
 - `format_files` using project-approved formatters
 - All edits target an isolated proposal workspace before review.
 
+Large-file editing uses bounded line-range reads followed by exact line-range
+replacement. The proposal layer keeps the original hash and produces a diff;
+it does not require sending the whole file to the model.
+
 Minimum validation tools:
 
 - `detect_commands`, `run_typecheck`, `run_lint`, `run_tests`, `run_build`

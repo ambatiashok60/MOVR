@@ -7,7 +7,24 @@ from fastapi import HTTPException
 from .config import Settings
 from .models import FileChange
 
-EXCLUDED = {".git", ".env", ".venv", "node_modules", "dist", "__pycache__"}
+EXCLUDED = {
+    ".git", ".env", ".venv", "node_modules", "dist", "build", "__pycache__",
+    ".DS_Store", ".ruff_cache", ".pytest_cache", ".angular", ".cache", "coverage",
+}
+BINARY_EXTENSIONS = {
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".pdf", ".zip", ".gz", ".tar",
+    ".7z", ".rar", ".woff", ".woff2", ".ttf", ".otf", ".mp3", ".mp4", ".mov", ".avi",
+    ".db", ".sqlite", ".pyc", ".dll", ".so", ".dylib", ".class", ".jar", ".exe", ".bin",
+}
+
+
+def is_binary(path: Path) -> bool:
+    if path.suffix.lower() in BINARY_EXTENSIONS:
+        return True
+    try:
+        return b"\x00" in path.open("rb").read(4096)
+    except OSError:
+        return True
 
 
 def resolve_workspace(raw: str, config: Settings) -> Path:
@@ -20,6 +37,7 @@ def resolve_workspace(raw: str, config: Settings) -> Path:
 
 
 def resolve_file(root: Path, relative: str) -> Path:
+    root = root.resolve()
     path = (root / relative).resolve()
     if not path.is_relative_to(root) or any(part in EXCLUDED for part in path.relative_to(root).parts):
         raise HTTPException(403, f"File is outside the allowed workspace: {relative}")
@@ -30,7 +48,7 @@ def files(root: Path, limit: int) -> list[str]:
     result: list[str] = []
     for path in root.rglob("*"):
         relative = path.relative_to(root)
-        if path.is_file() and not any(part in EXCLUDED for part in relative.parts):
+        if path.is_file() and not is_binary(path) and not any(part in EXCLUDED for part in relative.parts):
             result.append(str(relative))
             if len(result) >= limit:
                 break
@@ -60,6 +78,38 @@ def diff_for(root: Path, change: FileChange) -> str:
         fromfile=f"a/{change.path}", tofile=f"b/{change.path}",
     ))
 
+def diff_hunks(diff: str) -> list[dict]:
+    lines = diff.splitlines()
+    hunks, current = [], None
+    for line in lines:
+        if line.startswith('@@'):
+            if current: hunks.append(current)
+            current = {"id": f"hunk-{len(hunks) + 1}", "header": line, "lines": []}
+        elif current is not None:
+            current["lines"].append(line)
+    if current: hunks.append(current)
+    return hunks
+
+def apply_hunks(before: str, diff: str, accepted: set[str]) -> str:
+    source = before.splitlines(True)
+    output, cursor, index = [], 0, 0
+    for hunk in diff_hunks(diff):
+        index += 1
+        header = hunk["header"].split()
+        old = next((part for part in header if part.startswith('-')), '-1,0')[1:]
+        start = int(old.split(',')[0]) - 1
+        output.extend(source[cursor:start]); cursor = start
+        if hunk["id"] not in accepted:
+            count = int(old.split(',')[1]) if ',' in old else 1
+            output.extend(source[cursor:cursor + count]); cursor += count
+            continue
+        for line in hunk["lines"]:
+            if line.startswith(' '): output.append(line[1:] + ('\n' if not line[1:].endswith('\n') else '')); cursor += 1
+            elif line.startswith('-'): cursor += 1
+            elif line.startswith('+'): output.append(line[1:] + ('\n' if not line[1:].endswith('\n') else ''))
+    output.extend(source[cursor:])
+    return ''.join(output)
+
 
 def apply_change(root: Path, change: FileChange) -> None:
     path = resolve_file(root, change.path)
@@ -73,4 +123,3 @@ def apply_change(root: Path, change: FileChange) -> None:
     temporary = path.with_suffix(path.suffix + ".agent-tmp")
     temporary.write_text(change.content or "")
     temporary.replace(path)
-

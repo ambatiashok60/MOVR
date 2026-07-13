@@ -50,7 +50,8 @@ conda activate agentic-workspace-chat
 
 ## Configure AWS and the Workspace
 
-Create the local configuration:
+Create the local configuration at the project root. Do not place `.env` inside
+the `backend` directory:
 
 ```bash
 cp .env.example .env
@@ -59,18 +60,24 @@ cp .env.example .env
 Edit `.env` with your actual values:
 
 ```dotenv
+AWS_AUTH_MODE=sso
 AWS_PROFILE=your-sso-profile
 AWS_REGION=us-east-1
 BEDROCK_MODEL_ID=anthropic.claude-sonnet-4-5-20250929-v1:0
-BEDROCK_MAX_TOKENS=4096
-WORKSPACE_ALLOWED_ROOTS=/Users/you/Documents
+BEDROCK_MAX_TOKENS=8192
+WORKSPACE_ALLOWED_ROOTS=/Users/you/Documents,/Users/you/Projects
 WORKSPACE_MAX_FILES=10000
 WORKSPACE_MAX_FILE_BYTES=1048576
 AGENT_MAX_STEPS=12
+AGENT_MAX_RESPONSE_CONTINUATIONS=3
 AGENT_STATE_DIR=.agent-state
 CUSTOM_TOOL_TIMEOUT_SECONDS=5
 FRONTEND_ORIGIN=http://localhost:4200
 ```
+
+Set `AWS_AUTH_MODE=keys` instead when using direct credentials, then provide
+`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and optional `AWS_SESSION_TOKEN`.
+Keep these backend-only and never commit them.
 
 Verify an existing authenticated SSO session:
 
@@ -215,4 +222,3 @@ has permission to invoke it.
 Find the existing process or use matching alternative ports. If the backend
 port changes, update `frontend/proxy.conf.json`. If the frontend port changes,
 update `FRONTEND_ORIGIN` in `.env`.
-

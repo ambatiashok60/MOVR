@@ -2,7 +2,6 @@
 
 :root { color-scheme: dark; font-family: Manrope, sans-serif; background: #090a0f; color: #eef0f8; }
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 1080px; background: radial-gradient(circle at 50% -20%, #28204a 0, #0c0d14 32%, #08090d 70%); }
+body { margin: 0; min-width: 0; background: radial-gradient(circle at 50% -20%, #28204a 0, #0c0d14 32%, #08090d 70%); }
 button, input, textarea { font: inherit; }
 button { cursor: pointer; }
-
