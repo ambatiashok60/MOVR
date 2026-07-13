@@ -37,7 +37,9 @@ Rules:
 - Return structured patches only.
 - Do not overwrite whole specs for an extension.
 - Do not add raw locators to specs when page objects exist.
-- Use create, replace, or append operations only.
+- Use create/replace/append for specs. For supporting TypeScript files, use insert_class_member, insert_object_property, or insert_import with target_symbol and member_name instead of appending at EOF.
+- Emit exactly one primary spec patch plus only the supporting page-object, locator, import, fixture, or utility patches required by that test.
+- Never append a class method, object property, or import as raw file-ending text.
 - Generate CI-safe Playwright UI tests, not backend/API integration tests.
 - Reuse detected mocks/stubs, fixtures, auth/session setup, test data builders, and page objects.
 - Ground locators in UI source evidence or existing page object methods.

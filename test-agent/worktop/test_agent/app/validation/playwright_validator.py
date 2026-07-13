@@ -35,14 +35,18 @@ class PlaywrightValidator:
         )
         try:
             root = Path(repo_path)
-            if patches is None or len(patches.patches) != 1:
+            spec_patches = [
+                patch for patch in (patches.patches if patches else [])
+                if patch.path.endswith(self.SPEC_SUFFIXES)
+            ]
+            if len(spec_patches) != 1:
                 return ValidationCheck(
                     name="playwright_structure",
                     passed=False,
-                    output="Validation requires exactly one generated patch.",
+                    output="Validation requires exactly one primary Playwright spec patch.",
                 )
 
-            relative_path = patches.patches[0].path
+            relative_path = spec_patches[0].path
             path = (root / relative_path).resolve()
             if root.resolve() != path and root.resolve() not in path.parents:
                 return ValidationCheck(

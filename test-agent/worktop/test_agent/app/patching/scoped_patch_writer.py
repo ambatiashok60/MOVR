@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 
 from worktop.test_agent.app.patching.diff_generator import DiffGenerator
 from worktop.test_agent.app.patching.patch_planner import PatchPlanner
 from worktop.test_agent.app.schemas.code_patch import AppliedPatch, PatchSet, PatchWriteResult
 from worktop.test_agent.app.tools.playwright_parser_tool import PlaywrightParserTool
+from worktop.test_agent.app.tools.ts_ast_parser_tool import TsAstParserTool
 from worktop.core_services.app.utility.custom_logger.logging import logger
 
 
@@ -16,6 +18,7 @@ class ScopedPatchWriter:
         self.diffs = DiffGenerator()
         self.planner = PatchPlanner()
         self.playwright_parser = PlaywrightParserTool()
+        self.ts_parser = TsAstParserTool()
 
     def apply(self, repo_path: str, patches: PatchSet) -> PatchWriteResult:
         logger.info(
@@ -29,17 +32,22 @@ class ScopedPatchWriter:
                 f"planned_patches={len(planned.patches)}"
             )
             result = PatchWriteResult()
+            proposed: dict[Path, str] = {}
             for patch in planned.patches:
                 logger.info(
                     "[playwright-generation] stage=patch_writer status=applying "
                     f"operation={patch.operation} path={patch.path}"
                 )
                 path = self._resolve_safe_path(repo_path, patch.path)
-                path.parent.mkdir(parents=True, exist_ok=True)
                 existed_before = path.exists()
-                before = path.read_text(encoding="utf-8") if existed_before else ""
+                before = proposed.get(
+                    path,
+                    path.read_text(encoding="utf-8") if existed_before else "",
+                )
                 after = self._apply_content(before, patch)
-                path.write_text(after, encoding="utf-8")
+                if patch.path.endswith((".ts", ".tsx", ".js", ".jsx")):
+                    self.ts_parser.parse(patch.path, after)
+                proposed[path] = after
                 result.applied.append(
                     AppliedPatch(
                         path=patch.path,
@@ -48,6 +56,9 @@ class ScopedPatchWriter:
                         original_content=before if existed_before else None,
                     )
                 )
+            for path, content in proposed.items():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
             logger.info(
                 "[playwright-generation] stage=patch_writer status=completed "
                 f"applied={len(result.applied)}"
@@ -148,4 +159,48 @@ class ScopedPatchWriter:
                 insertion_index = max(containing, key=lambda block: block.start_line).end_line - 1
             return "".join(lines[:insertion_index] + [content] + lines[insertion_index:])
 
+        if patch.operation == "insert_class_member":
+            block = self.ts_parser.find_class(before, patch.target_symbol or "")
+            if block is None:
+                raise ValueError(
+                    f"Class `{patch.target_symbol}` not found in {patch.path}"
+                )
+            class_body = before[block["body_start"] : block["body_end"]]
+            if patch.member_name and self._member_exists(class_body, patch.member_name):
+                raise ValueError(
+                    f"Class member `{patch.member_name}` already exists in {patch.path}"
+                )
+            return self._insert_before_block_end(before, block["body_end"], content)
+
+        if patch.operation == "insert_object_property":
+            block = self.ts_parser.find_object(before, patch.target_symbol or "")
+            if block is None:
+                raise ValueError(
+                    f"Object `{patch.target_symbol}` not found in {patch.path}"
+                )
+            object_body = before[block["body_start"] : block["body_end"]]
+            if patch.member_name and self._member_exists(object_body, patch.member_name):
+                raise ValueError(
+                    f"Object property `{patch.member_name}` already exists in {patch.path}"
+                )
+            return self._insert_before_block_end(before, block["body_end"], content)
+
+        if patch.operation == "insert_import":
+            if patch.content.strip() in before:
+                return before
+            imports = list(self.ts_parser.parse(patch.path, before)["imports"])
+            if not imports:
+                return f"{content}{before}"
+            last_import = imports[-1]
+            offset = before.rfind(last_import) + len(last_import)
+            return f"{before[:offset]}\n{content.rstrip()}{before[offset:]}"
+
         raise ValueError(f"Unsupported patch operation: {patch.operation}")
+
+    def _member_exists(self, body: str, name: str) -> bool:
+        return bool(re.search(rf"\b{re.escape(name)}\s*[:=(]", body))
+
+    def _insert_before_block_end(self, before: str, offset: int, content: str) -> str:
+        prefix = before[:offset].rstrip()
+        suffix = before[offset:]
+        return f"{prefix}\n{content.rstrip()}\n{suffix}"

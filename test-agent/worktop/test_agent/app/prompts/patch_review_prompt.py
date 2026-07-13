@@ -4,9 +4,16 @@ from worktop.test_agent.app.prompts.prompt_sections import as_json, response_con
 from worktop.test_agent.app.schemas.code_patch import PatchSet
 from worktop.test_agent.app.schemas.playwright_ui_context import PlaywrightUiContext
 from worktop.test_agent.app.schemas.validation_result import ValidationResult
+from worktop.test_agent.app.schemas.behavioral_test_unit import AnchorFlowContext
+from worktop.test_agent.app.schemas.locator_decision import LocatorDecision
 
 
-def build_repair_prompt(patches: PatchSet, validation: ValidationResult) -> str:
+def build_repair_prompt(
+    patches: PatchSet,
+    validation: ValidationResult,
+    anchor: AnchorFlowContext | None = None,
+    locator_decisions: list[LocatorDecision] | None = None,
+) -> str:
     return f"""
 You are repairing generated Playwright patches after validation failure.
 
@@ -24,6 +31,12 @@ Current patches:
 Validation result:
 {as_json(validation)}
 
+Selected anchor flow and insertion context:
+{as_json(anchor or {})}
+
+Locator decisions for new steps after the anchor flow:
+{as_json(locator_decisions or [])}
+
 {response_contract(PatchSet)}
 """
 
@@ -31,6 +44,8 @@ Validation result:
 def build_critic_prompt(
     patches: PatchSet,
     ui_context: PlaywrightUiContext | None = None,
+    anchor: AnchorFlowContext | None = None,
+    locator_decisions: list[LocatorDecision] | None = None,
 ) -> str:
     return f"""
 You are reviewing generated Playwright UI patches for CI quality.
@@ -43,12 +58,20 @@ Rules:
 - Reject fixed sleeps, arbitrary timeout waits, and invented selectors.
 - Ensure mocks/stubs, auth/session setup, fixtures, and page objects follow existing repo patterns when present.
 - Ensure generated tests are deterministic, parallel-safe, and useful in CI reports.
+- When an anchor is supplied, preserve its copied inner flow and anchor boundary comments exactly.
+- Apply locator decisions only to the new steps after the anchor boundary; never rewrite proven anchor locators.
 
 Patches:
 {as_json(patches)}
 
 Playwright UI context:
 {as_json(ui_context or {})}
+
+Selected anchor flow and insertion context:
+{as_json(anchor or {})}
+
+Locator decisions for new steps after the anchor flow:
+{as_json(locator_decisions or [])}
 
 {response_contract(PatchSet)}
 """

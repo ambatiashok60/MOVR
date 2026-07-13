@@ -1620,7 +1620,9 @@ class FakeRepair:
     def __init__(self, repaired: PatchSet) -> None:
         self.repaired = repaired
 
-    def repair(self, patches: PatchSet, validation: ValidationResult) -> PatchSet:
+    def repair(
+        self, patches: PatchSet, validation: ValidationResult, anchor=None, locator_decisions=None
+    ) -> PatchSet:
         return self.repaired
 
 
@@ -1629,6 +1631,8 @@ class FakeCritic:
         self,
         patches: PatchSet,
         ui_context: PlaywrightUiContext,
+        anchor=None,
+        locator_decisions=None,
     ) -> PatchSet:
         return patches
 

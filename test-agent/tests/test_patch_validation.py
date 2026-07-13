@@ -176,3 +176,70 @@ def test_quality_findings_are_non_blocking() -> None:
 
     assert check.passed
     assert "Quality warnings (non-blocking)" in check.output
+
+
+def test_semantic_supporting_patches_and_spec_patch_write_transactionally(tmp_path: Path) -> None:
+    pages = tmp_path / "pages"
+    tests = tmp_path / "tests"
+    pages.mkdir()
+    tests.mkdir()
+    page = pages / "PlanPage.ts"
+    locators = pages / "planLocators.ts"
+    spec = tests / "plans.spec.ts"
+    page.write_text("export class PlanPage {\n}\n", encoding="utf-8")
+    locators.write_text("export const planLocators = {\n};\n", encoding="utf-8")
+    spec.write_text(SPEC, encoding="utf-8")
+    patches = PatchSet(
+        patches=[
+            CodePatch(
+                path="pages/PlanPage.ts",
+                operation="insert_class_member",
+                target_symbol="PlanPage",
+                member_name="savePlan",
+                content="  async savePlan() { return true; }",
+            ),
+            CodePatch(
+                path="pages/planLocators.ts",
+                operation="insert_object_property",
+                target_symbol="planLocators",
+                member_name="saveButton",
+                content="  saveButton: 'button',",
+            ),
+            _append_patch("saves a plan").patches[0],
+        ]
+    )
+
+    ScopedPatchWriter().apply(str(tmp_path), patches)
+
+    assert page.read_text(encoding="utf-8").index("savePlan") < page.read_text(encoding="utf-8").rindex("}")
+    assert locators.read_text(encoding="utf-8").index("saveButton") < locators.read_text(encoding="utf-8").rindex("}")
+    assert PlaywrightValidator().validate(str(tmp_path), patches).passed
+
+
+def test_invalid_supporting_patch_writes_nothing(tmp_path: Path) -> None:
+    page = tmp_path / "PlanPage.ts"
+    page.write_text("export class PlanPage {\n}\n", encoding="utf-8")
+    original = page.read_text(encoding="utf-8")
+    patches = PatchSet(
+        patches=[
+            CodePatch(
+                path="PlanPage.ts",
+                operation="insert_class_member",
+                target_symbol="PlanPage",
+                member_name="validMethod",
+                content="  validMethod() {}",
+            ),
+            CodePatch(
+                path="PlanPage.ts",
+                operation="insert_class_member",
+                target_symbol="MissingPage",
+                member_name="brokenMethod",
+                content="  brokenMethod() {}",
+            ),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="MissingPage"):
+        ScopedPatchWriter().apply(str(tmp_path), patches)
+
+    assert page.read_text(encoding="utf-8") == original

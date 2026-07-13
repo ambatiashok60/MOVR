@@ -371,7 +371,9 @@ class GenerationOrchestrator:
             patches = self._run_stage(
                 request.job_id,
                 "critic_review",
-                lambda: critic.review(patches, ui_context),
+                lambda: critic.review(
+                    patches, ui_context, anchor_flow_context, locator_decisions
+                ),
                 completed=lambda reviewed: {"patches": len(reviewed.patches)},
             )
             self._bind_append_to_anchor_describe(
@@ -420,6 +422,7 @@ class GenerationOrchestrator:
                 anchor_flow_context=anchor_flow_context,
                 flow_plan=flow_plan,
                 ownership_resolution=ownership_resolution,
+                locator_decisions=locator_decisions,
                 requires_bootstrap=repo_profile.requires_bootstrap,
                 critic=critic,
                 repair=repair,
@@ -673,6 +676,7 @@ class GenerationOrchestrator:
         anchor_flow_context: AnchorFlowContext | None = None,
         flow_plan: Any | None = None,
         ownership_resolution: Any | None = None,
+        locator_decisions: Any | None = None,
         requires_bootstrap: bool = False,
         policy: RepositoryPolicy | None = None,
         budget: GenerationBudget | None = None,
@@ -710,6 +714,7 @@ class GenerationOrchestrator:
                 anchor_flow_context=anchor_flow_context,
                 flow_plan=flow_plan,
                 ownership_resolution=ownership_resolution,
+                locator_decisions=locator_decisions,
                 requires_bootstrap=requires_bootstrap,
                 critic=critic,
                 repair=repair,
@@ -745,7 +750,9 @@ class GenerationOrchestrator:
             repaired_patches = self._run_stage(
                 request.job_id,
                 "repair_generation",
-                lambda current=patches, failed=validation: repair.repair(current, failed),
+                lambda current=patches, failed=validation: repair.repair(
+                    current, failed, anchor_flow_context, locator_decisions
+                ),
                 started={"attempt": attempt},
                 completed=lambda patch_set: {
                     "attempt": attempt,
@@ -756,7 +763,9 @@ class GenerationOrchestrator:
             patches = self._run_stage(
                 request.job_id,
                 "repair_critic_review",
-                lambda current=repaired_patches: critic.review(current, ui_context),
+                lambda current=repaired_patches: critic.review(
+                    current, ui_context, anchor_flow_context, locator_decisions
+                ),
                 started={"attempt": attempt},
                 completed=lambda reviewed: {
                     "attempt": attempt,
@@ -1238,7 +1247,7 @@ class GenerationOrchestrator:
         self._bind_append_to_anchor_describe(patches, anchor_flow_context, repo_path)
         checks = [
             self._extension_patch_check(patches, existing_test_context, flow_plan),
-            self._append_integration_check(patches, repo_path),
+            self._append_integration_check(patches, repo_path, anchor_flow_context),
             self._append_reuse_check(patches, anchor_flow_context),
             self._reference_integrity_check(patches, repo_path),
             self._ownership_emission_check(patches, ownership),
@@ -1256,8 +1265,15 @@ class GenerationOrchestrator:
         self,
         patches: PatchSet,
         repo_path: str,
+        anchor: AnchorFlowContext | None = None,
     ) -> ValidationCheck:
-        append_patches = [patch for patch in patches.patches if patch.operation == "append"]
+        append_patches = [
+            patch
+            for patch in patches.patches
+            if patch.operation == "append"
+            and (anchor is None or patch.path == anchor.file_path)
+            and patch.path.endswith((".spec.ts", ".spec.tsx", ".test.ts", ".test.tsx", ".e2e.ts", ".e2e.tsx"))
+        ]
         if not append_patches:
             return ValidationCheck(
                 name="append_integration",
@@ -1321,7 +1337,11 @@ class GenerationOrchestrator:
     ) -> None:
         if anchor is None:
             return
-        append_patches = [patch for patch in patches.patches if patch.operation == "append"]
+        append_patches = [
+            patch
+            for patch in patches.patches
+            if patch.operation == "append" and patch.path == anchor.file_path
+        ]
         if len(append_patches) != 1:
             return
         patch = append_patches[0]
@@ -1764,6 +1784,7 @@ class GenerationOrchestrator:
         anchor_flow_context: AnchorFlowContext | None = None,
         flow_plan: Any | None = None,
         ownership_resolution: Any | None = None,
+        locator_decisions: Any | None = None,
         requires_bootstrap: bool = False,
         policy: RepositoryPolicy | None = None,
         budget: GenerationBudget | None = None,
@@ -1775,7 +1796,9 @@ class GenerationOrchestrator:
             repaired_patches = self._run_stage(
                 request.job_id,
                 "repair_generation",
-                lambda current=patches, failed=validation: repair.repair(current, failed),
+                lambda current=patches, failed=validation: repair.repair(
+                    current, failed, anchor_flow_context, locator_decisions
+                ),
                 started={"attempt": attempt, "reason": "patch_plan_guard"},
                 completed=lambda patch_set: {
                     "attempt": attempt,
@@ -1786,7 +1809,9 @@ class GenerationOrchestrator:
             patches = self._run_stage(
                 request.job_id,
                 "repair_critic_review",
-                lambda current=repaired_patches: critic.review(current, ui_context),
+                lambda current=repaired_patches: critic.review(
+                    current, ui_context, anchor_flow_context, locator_decisions
+                ),
                 started={"attempt": attempt, "reason": "patch_plan_guard"},
                 completed=lambda reviewed: {
                     "attempt": attempt,
