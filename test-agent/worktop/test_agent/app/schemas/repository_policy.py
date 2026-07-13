@@ -16,7 +16,9 @@ class GenerationPolicy(BaseModel):
     locator_owner: LocatorOwner = "any"
     component_strategy: str = "component_objects"
     require_describe: bool = False
-    rollback_failed_patch: bool = True
+    # Debug-friendly default: retain the final failed attempt for inspection.
+    # Repositories can explicitly enable rollback for production workflows.
+    rollback_failed_patch: bool = False
     allow_full_duplicates: bool = False
 
 

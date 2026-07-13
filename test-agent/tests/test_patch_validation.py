@@ -78,11 +78,50 @@ test.describe('anchor suite', () => {
     GenerationOrchestrator.__new__(GenerationOrchestrator)._bind_append_to_anchor_describe(
         patches, anchor, str(tmp_path)
     )
+    assert patches.patches[0].operation == "append_test"
+    assert patches.patches[0].target_describe_title == "anchor suite"
+    assert patches.patches[0].start_line is None
     ScopedPatchWriter().apply(str(tmp_path), patches)
 
     content = path.read_text(encoding="utf-8")
     anchor_suite = content[content.index("anchor suite") :]
     assert "new branch" in anchor_suite
+
+
+def test_append_test_resolves_fresh_structural_describe_offset(tmp_path: Path) -> None:
+    path = tmp_path / "tests" / "plans.spec.ts"
+    path.parent.mkdir()
+    path.write_text(
+        """import { test } from '@playwright/test';
+test.describe('first suite', () => {
+  test('first flow', async () => {});
+});
+
+// Lines may move after planning; describe identity remains stable.
+test.describe('target suite', () => {
+  test('anchor flow', async () => {});
+});
+""",
+        encoding="utf-8",
+    )
+    patches = PatchSet(
+        patches=[
+            CodePatch(
+                path="tests/plans.spec.ts",
+                operation="append_test",
+                target_describe_title="target suite",
+                content="  test('new structural flow', async () => {});",
+            )
+        ]
+    )
+
+    ScopedPatchWriter().apply(str(tmp_path), patches)
+
+    content = path.read_text(encoding="utf-8")
+    first_suite, target_suite = content.split("test.describe('target suite'", 1)
+    assert "new structural flow" not in first_suite
+    assert "new structural flow" in target_suite
+    assert PlaywrightValidator().validate(str(tmp_path), patches).passed
 
 
 def test_append_rejects_duplicate_test_name_before_write(tmp_path: Path) -> None:
@@ -143,8 +182,8 @@ def test_append_requires_anchor_flow_as_uninterrupted_block() -> None:
         interrupted, anchor
     )
 
-    assert not check.passed
-    assert "uninterrupted block" in check.output
+    assert check.passed
+    assert "Non-blocking anchor reuse warning" in check.output
 
 
 def test_validator_only_checks_the_patch_target(tmp_path: Path) -> None:
@@ -243,3 +282,46 @@ def test_invalid_supporting_patch_writes_nothing(tmp_path: Path) -> None:
         ScopedPatchWriter().apply(str(tmp_path), patches)
 
     assert page.read_text(encoding="utf-8") == original
+
+
+def test_replace_test_resolves_fresh_structural_offsets(tmp_path: Path) -> None:
+    path = tmp_path / "tests" / "plans.spec.ts"
+    path.parent.mkdir()
+    path.write_text(
+        """import { test } from '@playwright/test';
+test.describe('plans', () => {
+  test('neighbor', async () => {});
+  test('target', async ({ page }) => {
+    await page.goto('/old');
+  });
+});
+""",
+        encoding="utf-8",
+    )
+    parser = ScopedPatchWriter().playwright_parser
+    _, _, expected = parser.find_test_block(
+        "tests/plans.spec.ts", path.read_text(encoding="utf-8"), "target", "plans"
+    )
+    patches = PatchSet(
+        patches=[
+            CodePatch(
+                path="tests/plans.spec.ts",
+                operation="replace_test",
+                target_test_title="target",
+                target_describe_title="plans",
+                expected_source=expected,
+                content=(
+                    "test('target', async ({ page }) => {\n"
+                    "  await page.goto('/new');\n"
+                    "});"
+                ),
+            )
+        ]
+    )
+
+    ScopedPatchWriter().apply(str(tmp_path), patches)
+
+    content = path.read_text(encoding="utf-8")
+    assert "test('neighbor'" in content
+    assert "page.goto('/new')" in content
+    assert "page.goto('/old')" not in content

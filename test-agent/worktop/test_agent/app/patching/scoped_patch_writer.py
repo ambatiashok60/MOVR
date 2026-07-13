@@ -123,7 +123,26 @@ class ScopedPatchWriter:
                 raise ValueError(f"Replace patch range is outside file: {patch.path}")
             return "".join(lines[:start] + [content] + lines[end:])
 
-        if patch.operation == "append":
+        if patch.operation == "replace_test":
+            start, end, current_source = self.playwright_parser.find_test_block(
+                patch.path,
+                before,
+                patch.target_test_title or "",
+                patch.target_describe_title,
+            )
+            if patch.expected_source is not None and current_source != patch.expected_source:
+                raise ValueError(
+                    f"Selected test changed before replacement: {patch.path} :: "
+                    f"{patch.target_test_title}"
+                )
+            generated = self.playwright_parser.extract_tests(patch.path, content)
+            if len(generated) != 1:
+                raise ValueError("replace_test content must contain exactly one complete test")
+            if generated[0].test_title != patch.target_test_title:
+                raise ValueError("replace_test must preserve the selected test title")
+            return f"{before[:start]}{content.rstrip()}{before[end:]}"
+
+        if patch.operation in {"append", "append_test"}:
             existing_tests = self.playwright_parser.extract_tests(patch.path, before)
             generated_tests = self.playwright_parser.extract_tests(patch.path, content)
             if len(generated_tests) != 1:
@@ -137,6 +156,19 @@ class ScopedPatchWriter:
             if duplicates:
                 raise ValueError(
                     f"Generated test title already exists in {patch.path}: {', '.join(duplicates)}"
+                )
+
+            if patch.operation == "append_test":
+                insertion_offset = self.playwright_parser.find_describe_insertion_offset(
+                    patch.path,
+                    before,
+                    patch.target_describe_title or "",
+                )
+                prefix = before[:insertion_offset]
+                separator = "" if prefix.endswith("\n") else "\n"
+                return (
+                    f"{prefix}{separator}{content.rstrip()}\n"
+                    f"{before[insertion_offset:]}"
                 )
 
             describes = self.playwright_parser.extract_describes(patch.path, before)

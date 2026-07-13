@@ -5,7 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 PatchOperation = Literal[
-    "create", "replace", "append", "insert_class_member",
+    "create", "replace", "append", "append_test", "replace_test", "insert_class_member",
     "insert_object_property", "insert_import",
 ]
 
@@ -19,6 +19,9 @@ class CodePatch(BaseModel):
     reason: str = ""
     target_symbol: str | None = None
     member_name: str | None = None
+    target_test_title: str | None = None
+    target_describe_title: str | None = None
+    expected_source: str | None = None
 
 
 class PatchSet(BaseModel):

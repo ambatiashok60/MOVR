@@ -84,6 +84,66 @@ class PlaywrightParserTool:
             )
             raise
 
+    def find_test_block(
+        self,
+        file_path: str,
+        content: str,
+        test_title: str,
+        describe_title: str | None = None,
+    ) -> tuple[int, int, str]:
+        """Resolve one test to fresh character offsets in the current source."""
+        describes = self.extract_describes(file_path, content)
+        matches: list[tuple[int, int, str]] = []
+        for match in self.TEST_PATTERN.finditer(content):
+            if self._is_inside_non_code(content, match.start()):
+                continue
+            title = self._clean_title(match.group("title"))
+            if title != test_title:
+                continue
+            body_end = self._find_call_end_offset(content, match.end())
+            start_line = self._line_number(content, match.start())
+            end_line = self._line_number(content, body_end)
+            owner = self._find_containing_describe(describes, start_line, end_line)
+            if describe_title is not None and owner != describe_title:
+                continue
+            statement_end = body_end + 1
+            while statement_end < len(content) and content[statement_end] in " \t":
+                statement_end += 1
+            if statement_end < len(content) and content[statement_end] == ")":
+                statement_end += 1
+            if statement_end < len(content) and content[statement_end] == ";":
+                statement_end += 1
+            matches.append((match.start(), statement_end, content[match.start():statement_end]))
+        if len(matches) != 1:
+            raise ValueError(
+                f"Expected exactly one test `{test_title}` in describe "
+                f"`{describe_title or '<root>'}`, found {len(matches)}"
+            )
+        return matches[0]
+
+    def find_describe_insertion_offset(
+        self,
+        file_path: str,
+        content: str,
+        describe_title: str,
+    ) -> int:
+        """Resolve one describe's closing body brace in the current source."""
+        matches: list[int] = []
+        for match in self.DESCRIBE_PATTERN.finditer(content):
+            if self._is_inside_non_code(content, match.start()):
+                continue
+            if self._clean_title(match.group("title")) != describe_title:
+                continue
+            body_end = self._find_call_end_offset(content, match.end())
+            if body_end > match.end():
+                matches.append(body_end)
+        if len(matches) != 1:
+            raise ValueError(
+                f"Expected exactly one describe `{describe_title}` in {file_path}, "
+                f"found {len(matches)}"
+            )
+        return matches[0]
+
     def extract_describes(
         self,
         file_path: str,

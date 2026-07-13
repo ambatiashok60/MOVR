@@ -37,7 +37,7 @@ Rules:
 - Return structured patches only.
 - Do not overwrite whole specs for an extension.
 - Do not add raw locators to specs when page objects exist.
-- Use create/replace/append for specs. For supporting TypeScript files, use insert_class_member, insert_object_property, or insert_import with target_symbol and member_name instead of appending at EOF.
+- Use create/replace_test/append_test for specs. For supporting TypeScript files, use insert_class_member, insert_object_property, or insert_import with target_symbol and member_name instead of appending at EOF.
 - Emit exactly one primary spec patch plus only the supporting page-object, locator, import, fixture, or utility patches required by that test.
 - Never append a class method, object property, or import as raw file-ending text.
 - Generate CI-safe Playwright UI tests, not backend/API integration tests.
@@ -49,7 +49,7 @@ Rules:
 - Include error, empty, loading, role, or permission assertions only when they are part of the requested functional intent or nearby repo pattern.
 - Keep generated tests parallel-safe and deterministic under CI.
 - If Test action is extend_existing_test, use the Existing test context below as the only target test.
-- For extend_existing_test, emit a replace patch for the exact Existing test context file_path, start_line, and end_line.
+- For extend_existing_test, emit replace_test with the Existing test context file_path, target_test_title, target_describe_title, and expected_source. Do not use line-based replace.
 - For extend_existing_test, patch content must be the full replacement test block, not a fragment.
 - For extend_existing_test, preserve the existing test title, fixtures, page objects, mocks, setup, and proven flow unless the requested behavior requires a minimal change.
 - Do not extend any other test block or overwrite the whole spec file.
@@ -61,7 +61,7 @@ Rules:
 - In the new test, add `// Anchor flow: <anchor test title>` immediately before the copied anchor statements and `// End anchor flow; new scenario steps begin below.` immediately after them. These comments document which test was reused and the exact extent of reuse.
 - For append_new_test, add only the steps and assertions the requested behavior needs on top of the anchor flow; do not reinvent a parallel setup or drop the anchor's proven setup.
 - For append_new_test, never edit or replace the original anchor test. The new test may copy its proven inner flow, but must use a unique title and add the requested behavior afterward.
-- For append_new_test, emit the complete test block and set start_line inside the intended describe block. If the target has exactly one describe block, start_line may be null and deterministic insertion will use that block.
+- For append_new_test, emit append_test with one complete test block and target_describe_title. Do not provide a line-based insertion position; the writer resolves the describe's current structural closing offset immediately before writing.
 - The generated test title must be unique within the target file.
 - If Test action is create_new_spec and an Anchor flow context is provided, mirror its setup, auth/session, fixture, and page-object style in the new spec; do not copy its test titles or assertions.
 - When Locator decisions are provided, use exactly those locators for the matching interactions; do not substitute or invent alternatives that lack source evidence.

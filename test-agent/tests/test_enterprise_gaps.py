@@ -479,7 +479,7 @@ class TestRepositoryPolicy:
         assert policy.source == "defaults"
         assert policy.generation.allow_before_each_updates is True
         assert policy.generation.assertion_location == "any"
-        assert policy.generation.rollback_failed_patch is True
+        assert policy.generation.rollback_failed_patch is False
 
     def test_policy_file_is_loaded_without_yaml_dependency(self, tmp_path: Path) -> None:
         service = RepositoryPolicyService()
@@ -637,7 +637,7 @@ class TestGenerationManifest:
         assert manifest.prompt_versions  # every prompt module fingerprinted
         assert all(len(digest) == 12 for digest in manifest.prompt_versions.values())
         assert manifest.settings_snapshot["max_repair_attempts"] == "2"
-        assert manifest.policy_snapshot["rollback_failed_patch"] == "True"
+        assert manifest.policy_snapshot["rollback_failed_patch"] == "False"
         assert [decision.stage for decision in manifest.decisions] == [
             "spec_placement",
             "test_action",

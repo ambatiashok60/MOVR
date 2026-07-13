@@ -22,8 +22,10 @@ Rules:
 - Do not modify unrelated repository files.
 - Return structured patches only.
 - Repair parser, line-range, describe-placement, duplicate-title, and anchor-boundary failures in the patch instead of changing the intended scenario.
+- When validation reports a duplicate test title, rename only the generated test to a concise behavior-specific title that is absent from the target spec. Preserve its body, operation, path, and structural target.
 - For extension repairs, preserve every existing step and assertion and keep the exact parser-validated target range.
-- For append repairs, keep the selected anchor flow uninterrupted, retain its boundary comments, and insert the complete test inside the selected describe block.
+- For append repairs, preserve append_test and target_describe_title, keep the selected anchor flow uninterrupted, retain its boundary comments, and return exactly one complete test block.
+- For supporting page or utility patches, preserve insert_class_member, insert_object_property, or insert_import plus target_symbol/member_name so the writer can re-resolve the current structural insertion point.
 
 Current patches:
 {as_json(patches)}

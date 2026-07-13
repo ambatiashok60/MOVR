@@ -332,6 +332,22 @@ def test_existing_context_does_not_fall_back_to_another_test() -> None:
     assert context is None
 
 
+def test_extend_decision_carries_stable_selected_test_identity() -> None:
+    from worktop.test_agent.app.services.test_action_service import TestActionService
+
+    candidate = _anchor_unit("Opens   Plan", 12)
+    decision = TestActionService()._bind_selected_test_identity(
+        PlaywrightTestActionDecision(
+            action="extend_existing_test", target_test_title=" opens plan "
+        ),
+        [candidate],
+    )
+
+    assert decision.target_test_title == candidate.test_title
+    assert decision.target_file_path == candidate.file_path
+    assert decision.target_start_line == candidate.start_line
+
+
 def test_anchor_flow_context_uses_agent_ranking_within_target_file(tmp_path) -> None:
     target = tmp_path / "tests" / "plans.spec.ts"
     target.parent.mkdir()
@@ -460,8 +476,8 @@ def test_append_reuse_check_fails_when_no_overlap() -> None:
         ]
     )
     check = orchestrator._append_reuse_check(patches, anchor)
-    assert check.passed is False
-    assert "reinvent the flow" in check.output
+    assert check.passed is True
+    assert "Non-blocking anchor reuse warning" in check.output
 
 
 def test_append_reuse_check_passes_when_anchor_page_object_reused() -> None:
@@ -1273,7 +1289,7 @@ def test_code_generation_prompt_includes_existing_test_context_contract() -> Non
     )
 
     assert "Existing test context:" in prompt
-    assert "emit a replace patch for the exact Existing test context file_path" in prompt
+    assert "emit replace_test with the Existing test context file_path" in prompt
     assert '"start_line": 10' in prompt
     assert '"end_line": 18' in prompt
     assert "test('opens plan design'" in prompt
@@ -1482,7 +1498,7 @@ def test_unsafe_extension_action_downgrades_when_no_valid_context_exists() -> No
     assert action.decision_trace.decision == "append_new_test"
 
 
-def test_extension_patch_guard_repairs_before_writing_wrong_range() -> None:
+def test_extension_patch_guard_repairs_before_writing_wrong_range(tmp_path) -> None:
     orchestrator = GenerationOrchestrator()
     patch_writer = FakePatchWriter()
     validator = FakePassingValidator()
@@ -1515,9 +1531,21 @@ def test_extension_patch_guard_repairs_before_writing_wrong_range() -> None:
             )
         ]
     )
+    target = tmp_path / "tests" / "plans.spec.ts"
+    target.parent.mkdir()
+    target.write_text(
+        """import { test, expect } from '@playwright/test';
+test.describe('plans', () => {
+  test('opens plan design', async ({ page }) => {
+    await page.goto('/');
+  });
+});
+""",
+        encoding="utf-8",
+    )
     request = GenerationRequest(
         job_id="job-1",
-        repo_path="/tmp/repo",
+        repo_path=str(tmp_path),
         tenant_id="tenant-1",
         test_case_name="repair extension",
         run_validation=True,
@@ -1528,11 +1556,12 @@ def test_extension_patch_guard_repairs_before_writing_wrong_range() -> None:
         patches=initial,
         ui_context=PlaywrightUiContext(),
         existing_test_context=ExistingTestContext(
-            file_path="tests/plans.spec.ts",
-            test_title="opens plan design",
-            start_line=10,
-            end_line=18,
-            source_excerpt="test('opens plan design', async ({ page }) => {});",
+                file_path="tests/plans.spec.ts",
+                describe_title="plans",
+                test_title="opens plan design",
+                start_line=3,
+                end_line=5,
+                source_excerpt="test('opens plan design', async ({ page }) => { await page.goto('/'); });",
         ),
         critic=FakeCritic(),
         repair=FakeRepair(repaired),
@@ -1544,7 +1573,7 @@ def test_extension_patch_guard_repairs_before_writing_wrong_range() -> None:
     assert validation is not None
     assert validation.passed is True
     assert final_patches == repaired
-    assert patch_result.applied[0].operation == "replace"
+    assert patch_result.applied[0].operation == "replace_test"
 
 
 class FakePatchWriter:

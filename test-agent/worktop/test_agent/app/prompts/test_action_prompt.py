@@ -31,6 +31,7 @@ Rules:
 - Reuse existing auth/session, fixture, mock/stub, and page-object patterns.
 - Avoid duplicate coverage when an existing spec already proves the same visible behavior.
 - Choose extend_existing_test only after reading the exact candidate block and confirming its title and source range. Include that evidence in the decision trace.
+- For extend_existing_test, always return target_test_title, target_file_path, and target_start_line copied exactly from the selected candidate. These fields are the stable handoff to patch generation.
 
 Spec placement:
 {as_json(placement)}

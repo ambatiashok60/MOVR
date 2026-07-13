@@ -21,6 +21,8 @@ TestActionValue = Literal["extend_existing_test", "append_new_test", "create_new
 class TestActionDecision(BaseModel):
     action: TestActionValue
     target_test_title: str | None = None
+    target_file_path: str | None = None
+    target_start_line: int | None = None
     confidence: float = Field(ge=0.0, le=1.0, default=0.0)
     decision_trace: DecisionTrace = Field(
         default_factory=lambda: DecisionTrace(decision="undecided")

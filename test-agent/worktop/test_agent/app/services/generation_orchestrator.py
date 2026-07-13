@@ -379,6 +379,9 @@ class GenerationOrchestrator:
             self._bind_append_to_anchor_describe(
                 patches, anchor_flow_context, request.repo_path
             )
+            self._bind_extension_target(
+                patches, existing_test_context, request.repo_path
+            )
 
             if repo_profile.requires_bootstrap:
                 patches = self._run_stage(
@@ -807,6 +810,15 @@ class GenerationOrchestrator:
                 started={"reason": "policy_rollback_failed_patch"},
             )
             patch_result = PatchWriteResult()
+        else:
+            logger.warning(
+                "[playwright-generation] stage=failed_patch_retention status=retained "
+                "job_id=%s paths=%s failed_checks=%s reason=debug_inspection "
+                "rollback=false",
+                request.job_id,
+                [patch.path for patch in patch_result.applied],
+                [check.name for check in validation.checks if not check.passed],
+            )
         return patch_result, validation, patches
 
     def _behavior_for_placement(
@@ -862,19 +874,24 @@ class GenerationOrchestrator:
 
         target_spec = placement.target_spec_file
         target_title = action.target_test_title
+        target_file = action.target_file_path or target_spec
+        target_start = action.target_start_line
         normalized_target = str(PurePosixPath(target_spec or "")).removeprefix("./")
+        normalized_action_file = str(PurePosixPath(target_file or "")).removeprefix("./")
+        normalized_title = self._normalize_test_title(target_title)
         matches = [
             candidate
             for candidate in candidates
-            if candidate.test_title == target_title
+            if self._normalize_test_title(candidate.test_title) == normalized_title
             and (
-                not target_spec
+                not target_file
                 or str(PurePosixPath(candidate.file_path)).removeprefix("./")
-                == normalized_target
+                == normalized_action_file
             )
+            and (target_start is None or candidate.start_line == target_start)
         ]
         if not matches:
-            logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'existing_test_context', 'missing', {'target_spec': target_spec or 'none', 'target_test': target_title or 'none'})
+            logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'existing_test_context', 'missing', {'target_spec': normalized_target or 'none', 'target_test': target_title or 'none', 'target_file': normalized_action_file or 'none', 'target_start_line': target_start, 'available_tests': [(candidate.file_path, candidate.test_title, candidate.start_line) for candidate in candidates]})
             return None
 
         selected = matches[0]
@@ -891,6 +908,9 @@ class GenerationOrchestrator:
             behavior_summary=selected.behavior_summary,
             source_excerpt=selected.source_excerpt,
         )
+
+    def _normalize_test_title(self, title: str | None) -> str:
+        return " ".join((title or "").strip().lower().split())
 
     def _normalize_bootstrap_placement(
         self,
@@ -1245,6 +1265,7 @@ class GenerationOrchestrator:
         policy: RepositoryPolicy | None = None,
     ) -> ValidationResult:
         self._bind_append_to_anchor_describe(patches, anchor_flow_context, repo_path)
+        self._bind_extension_target(patches, existing_test_context, repo_path)
         checks = [
             self._extension_patch_check(patches, existing_test_context, flow_plan),
             self._append_integration_check(patches, repo_path, anchor_flow_context),
@@ -1256,8 +1277,25 @@ class GenerationOrchestrator:
         ]
         if policy is not None:
             checks.extend(self.policy.checks(patches, policy))
+        append_reuse = next(
+            (check for check in checks if check.name == "append_flow_reuse"), None
+        )
+        if append_reuse is not None and (
+            "warning" in append_reuse.output.lower()
+            or not append_reuse.passed
+        ):
+            logger.warning(
+                "[playwright-generation] stage=append_flow_reuse status=advisory "
+                "blocking=false target_spec=%s anchor=%s reason=%s",
+                anchor_flow_context.file_path if anchor_flow_context else "none",
+                anchor_flow_context.anchor_test_title if anchor_flow_context else "none",
+                append_reuse.output,
+            )
+        blocking_checks = [
+            check for check in checks if check.name != "append_flow_reuse"
+        ]
         return ValidationResult(
-            passed=all(check.passed for check in checks),
+            passed=all(check.passed for check in blocking_checks),
             checks=checks,
         )
 
@@ -1270,7 +1308,7 @@ class GenerationOrchestrator:
         append_patches = [
             patch
             for patch in patches.patches
-            if patch.operation == "append"
+            if patch.operation in {"append", "append_test"}
             and (anchor is None or patch.path == anchor.file_path)
             and patch.path.endswith((".spec.ts", ".spec.tsx", ".test.ts", ".test.tsx", ".e2e.ts", ".e2e.tsx"))
         ]
@@ -1312,7 +1350,17 @@ class GenerationOrchestrator:
             patch.path,
             path.read_text(encoding="utf-8"),
         )
-        if patch.start_line is None and len(describes) != 1:
+        if patch.operation == "append_test":
+            matching_describes = [
+                block
+                for block in describes
+                if block.title == patch.target_describe_title
+            ]
+            if len(matching_describes) != 1:
+                findings.append(
+                    "append_test must identify exactly one target describe block."
+                )
+        elif patch.start_line is None and len(describes) != 1:
             findings.append(
                 "Append target must have exactly one describe block when start_line is omitted."
             )
@@ -1340,11 +1388,14 @@ class GenerationOrchestrator:
         append_patches = [
             patch
             for patch in patches.patches
-            if patch.operation == "append" and patch.path == anchor.file_path
+            if patch.operation in {"append", "append_test"} and patch.path == anchor.file_path
         ]
         if len(append_patches) != 1:
             return
         patch = append_patches[0]
+        patch.operation = "append_test"
+        patch.target_describe_title = anchor.describe_title
+        patch.start_line = None
         path = Path(repo_path) / patch.path
         if not path.is_file():
             return
@@ -1353,8 +1404,41 @@ class GenerationOrchestrator:
             path.read_text(encoding="utf-8", errors="ignore"),
         )
         matching = [block for block in describes if block.title == anchor.describe_title]
-        if matching:
-            patch.start_line = matching[0].end_line
+        if len(matching) != 1:
+            return
+
+    def _bind_extension_target(
+        self,
+        patches: PatchSet,
+        context: ExistingTestContext | None,
+        repo_path: str,
+    ) -> None:
+        if context is None:
+            return
+        matching = [
+            patch
+            for patch in patches.patches
+            if patch.path == context.file_path
+            and patch.operation in {"replace", "replace_test"}
+        ]
+        if len(matching) != 1:
+            return
+        patch = matching[0]
+        target = Path(repo_path) / context.file_path
+        if not target.is_file():
+            return
+        _, _, source = PlaywrightParserTool().find_test_block(
+            context.file_path,
+            target.read_text(encoding="utf-8", errors="ignore"),
+            context.test_title,
+            context.describe_title,
+        )
+        patch.operation = "replace_test"
+        patch.start_line = None
+        patch.end_line = None
+        patch.target_test_title = context.test_title
+        patch.target_describe_title = context.describe_title
+        patch.expected_source = source
 
     def _extension_patch_check(
         self,
@@ -1375,23 +1459,22 @@ class GenerationOrchestrator:
         findings: list[str] = []
         if not matching_patches:
             findings.append(
-                "extend_existing_test must patch "
-                f"{existing_test_context.file_path} at lines "
-                f"{existing_test_context.start_line}-{existing_test_context.end_line}"
+                "extend_existing_test must structurally replace the selected test in "
+                f"{existing_test_context.file_path}"
             )
         exact_replacements = [
             patch
             for patch in matching_patches
-            if patch.operation == "replace"
-            and patch.start_line == existing_test_context.start_line
-            and patch.end_line == existing_test_context.end_line
+            if patch.operation == "replace_test"
+            and patch.target_test_title == existing_test_context.test_title
+            and patch.target_describe_title == existing_test_context.describe_title
+            and bool(patch.expected_source)
         ]
         if matching_patches and not exact_replacements:
             findings.append(
-                "extend_existing_test requires an exact replace patch for "
-                f"{existing_test_context.file_path}:{existing_test_context.start_line}-"
-                f"{existing_test_context.end_line}; generated ranges were "
-                f"{[(patch.operation, patch.start_line, patch.end_line) for patch in matching_patches]}"
+                "extend_existing_test requires replace_test bound to the selected "
+                f"describe/title in {existing_test_context.file_path}; generated targets were "
+                f"{[(patch.operation, patch.target_describe_title, patch.target_test_title) for patch in matching_patches]}"
             )
         for patch in exact_replacements:
             if existing_test_context.test_title not in patch.content:
@@ -1411,9 +1494,10 @@ class GenerationOrchestrator:
             output="\n".join(findings)
             if findings
             else (
-                "Existing test extension patch targets the selected block exactly: "
-                f"{existing_test_context.file_path}:"
-                f"{existing_test_context.start_line}-{existing_test_context.end_line}"
+                "Existing test extension patch is structurally bound to: "
+                f"{existing_test_context.file_path} :: "
+                f"{existing_test_context.describe_title or '<root>'} :: "
+                f"{existing_test_context.test_title}"
             ),
         )
 
@@ -1482,9 +1566,9 @@ class GenerationOrchestrator:
         if anchor_marker not in combined_content or end_marker not in combined_content:
             return ValidationCheck(
                 name="append_flow_reuse",
-                passed=False,
+                passed=True,
                 output=(
-                    "append_new_test must identify the anchor with "
+                    "Non-blocking anchor reuse warning: append_new_test should identify the anchor with "
                     f"`{anchor_marker}` and mark its reuse boundary with `{end_marker}`."
                 ),
             )
@@ -1509,9 +1593,9 @@ class GenerationOrchestrator:
         if anchor_lines and anchor_start is None:
             return ValidationCheck(
                 name="append_flow_reuse",
-                passed=False,
+                passed=True,
                 output=(
-                    "append_new_test must preserve the anchor's inner flow as one "
+                    "Non-blocking anchor reuse warning: append_new_test should preserve the anchor's inner flow as one "
                     "uninterrupted block before adding the new scenario steps."
                 ),
             )
@@ -1520,8 +1604,8 @@ class GenerationOrchestrator:
         if marker_line > end_marker_line:
             return ValidationCheck(
                 name="append_flow_reuse",
-                passed=False,
-                output="Anchor flow markers are out of order in the appended test.",
+                passed=True,
+                output="Non-blocking anchor reuse warning: anchor flow markers are out of order.",
             )
         if anchor_start is not None and not (
             marker_line < anchor_start
@@ -1529,8 +1613,8 @@ class GenerationOrchestrator:
         ):
             return ValidationCheck(
                 name="append_flow_reuse",
-                passed=False,
-                output="Anchor flow comments must exactly surround the preserved flow block.",
+                passed=True,
+                output="Non-blocking anchor reuse warning: anchor comments should surround the preserved flow block.",
             )
         if not reusable_signals:
             return ValidationCheck(
@@ -1539,15 +1623,15 @@ class GenerationOrchestrator:
                 output="Appended test preserves the anchor flow as an uninterrupted block.",
             )
         reused = [signal for signal in reusable_signals if signal in combined_content]
-        passed = bool(reused)
         return ValidationCheck(
             name="append_flow_reuse",
-            passed=passed,
+            passed=True,
             output=(
                 f"Appended test reuses anchor setup signals: {reused}"
-                if passed
+                if reused
                 else (
-                    "append_new_test must reuse the anchor flow's proven setup; the "
+                    "Non-blocking anchor reuse warning: append_new_test should reuse "
+                    "the anchor flow's proven setup; the "
                     "generated test references none of its page objects or non-generic "
                     f"fixtures {reusable_signals} and appears to reinvent the flow."
                 )

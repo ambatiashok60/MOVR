@@ -15,7 +15,7 @@ class PatchPlanner:
         if patch.path.startswith("/") or ".." in patch.path.split("/"):
             raise ValueError(f"Unsafe patch path: {patch.path}")
         if patch.operation in {
-            "create", "replace", "append", "insert_class_member",
+            "create", "replace", "append", "append_test", "replace_test", "insert_class_member",
             "insert_object_property", "insert_import",
         } and not patch.content:
             raise ValueError(f"Patch content is required for {patch.operation}")
@@ -26,8 +26,12 @@ class PatchPlanner:
                 raise ValueError("Invalid replace line range")
         if patch.operation == "append" and patch.start_line is not None and patch.start_line < 1:
             raise ValueError("Append insertion line must be 1 or greater")
+        if patch.operation == "append_test" and not patch.target_describe_title:
+            raise ValueError("append_test requires target_describe_title")
         if patch.operation in {"insert_class_member", "insert_object_property"}:
             if not patch.target_symbol or not patch.member_name:
                 raise ValueError(
                     f"{patch.operation} requires target_symbol and member_name"
                 )
+        if patch.operation == "replace_test" and not patch.target_test_title:
+            raise ValueError("replace_test requires target_test_title")

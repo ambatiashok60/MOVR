@@ -1171,13 +1171,14 @@ generation:
   assertion_location: spec        # spec | page_object | any
   locator_owner: page_object      # page_object | spec | any
   require_describe: true
-  rollback_failed_patch: true
+  rollback_failed_patch: false     # retain the final failed attempt for debugging
   allow_full_duplicates: false
 ```
 
 Policy checks join the patch-plan guard, so violations route through the
-repair loop like any other structural failure; exhausted failures roll the
-repository back when the policy demands a clean tree.
+repair loop like any other structural failure. Exhausted failures are retained
+by default for inspection; set `rollback_failed_patch: true` when a production
+workflow requires a clean tree.
 
 ### Deterministic Generation (Gap 30)
 
