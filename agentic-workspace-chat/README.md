@@ -4,6 +4,7 @@ Detailed design and delivery tracking:
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md)
+- [`docs/CONDA_SETUP.md`](docs/CONDA_SETUP.md) — isolated local setup and tests
 
 ## Installation
 
