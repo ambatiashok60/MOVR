@@ -479,7 +479,7 @@ class TestRepositoryPolicy:
         assert policy.source == "defaults"
         assert policy.generation.allow_before_each_updates is True
         assert policy.generation.assertion_location == "any"
-        assert policy.generation.rollback_failed_patch is True
+        assert policy.generation.rollback_failed_patch is False
 
     def test_policy_file_is_loaded_without_yaml_dependency(self, tmp_path: Path) -> None:
         service = RepositoryPolicyService()
@@ -637,7 +637,7 @@ class TestGenerationManifest:
         assert manifest.prompt_versions  # every prompt module fingerprinted
         assert all(len(digest) == 12 for digest in manifest.prompt_versions.values())
         assert manifest.settings_snapshot["max_repair_attempts"] == "2"
-        assert manifest.policy_snapshot["rollback_failed_patch"] == "True"
+        assert manifest.policy_snapshot["rollback_failed_patch"] == "False"
         assert [decision.stage for decision in manifest.decisions] == [
             "spec_placement",
             "test_action",
@@ -759,6 +759,21 @@ class TestGenerationBudget:
         assert report.usage.llm_calls == 2
         assert any("llm_calls used 2 of 1" in reason for reason in report.exceeded_thresholds)
 
+    def test_observe_mode_soft_passes_budget_overages(self) -> None:
+        budget = GenerationBudget(
+            limits=BudgetLimits(max_llm_calls=1, max_generation_seconds=0.0),
+            enforcement_mode="observe",
+        )
+
+        budget.charge_llm_call(prompt_chars=100)
+        budget.charge_llm_call(prompt_chars=200)
+        report = budget.report()
+
+        assert report.review_required is False
+        assert report.escalated is False
+        assert report.enforcement_mode == "observe"
+        assert report.exceeded_thresholds
+
 
 class TestWorkspaceIsolation:
     def test_second_job_on_same_repo_is_locked_out(self, tmp_path: Path) -> None:
@@ -827,6 +842,18 @@ class TestWorkspaceIsolation:
         repo.mkdir()
 
         manager.acquire("job-dead", str(repo))
+        reclaimed = manager.acquire("job-live", str(repo))
+
+        assert reclaimed.job_id == "job-live"
+        manager.release(reclaimed)
+
+    def test_lock_from_dead_process_is_reclaimed_immediately(self, tmp_path: Path) -> None:
+        manager = WorkspaceManager(workspace_root=str(tmp_path / "ws"))
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        manager.acquire("job-dead", str(repo))
+        manager._process_exists = lambda pid: False  # type: ignore[method-assign]
+
         reclaimed = manager.acquire("job-live", str(repo))
 
         assert reclaimed.job_id == "job-live"

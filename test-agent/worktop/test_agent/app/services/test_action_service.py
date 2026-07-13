@@ -10,6 +10,7 @@ from worktop.test_agent.app.schemas.functional_intent import FunctionalIntent
 from worktop.test_agent.app.schemas.playwright_ui_context import PlaywrightUiContext
 from worktop.test_agent.app.schemas.spec_placement import SpecPlacementDecision
 from worktop.test_agent.app.schemas.test_action_decision import TestActionDecision
+from worktop.test_agent.app.schemas.test_action_decision import TestActions
 from worktop.core_services.app.utility.custom_logger.logging import logger
 
 
@@ -35,6 +36,7 @@ class TestActionService:
         try:
             ranked = self.ranking_agent.rank(candidates, intent)
             decision = self.decision_agent.decide(placement, ranked, ui_context, repo_path)
+            decision = self._bind_selected_test_identity(decision, ranked)
             logger.info(
                 "[playwright-generation] stage=test_action status=completed action=%s target_test=%s",
                 decision.action,
@@ -65,3 +67,27 @@ class TestActionService:
                 decision.decision_trace.evidence,
             )
             return decision
+
+    def _bind_selected_test_identity(
+        self,
+        decision: TestActionDecision,
+        ranked: list[BehavioralTestUnit],
+    ) -> TestActionDecision:
+        if decision.action != TestActions.EXTEND_EXISTING_TEST:
+            return decision
+        normalized = " ".join((decision.target_test_title or "").strip().lower().split())
+        matches = [
+            candidate
+            for candidate in ranked
+            if " ".join(candidate.test_title.strip().lower().split()) == normalized
+        ]
+        if len(matches) != 1:
+            return decision
+        selected = matches[0]
+        return decision.model_copy(
+            update={
+                "target_test_title": selected.test_title,
+                "target_file_path": selected.file_path,
+                "target_start_line": selected.start_line,
+            }
+        )

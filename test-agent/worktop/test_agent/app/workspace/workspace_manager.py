@@ -138,11 +138,26 @@ class WorkspaceManager:
             except FileExistsError:
                 holder = self._read_lock(lock_file)
                 acquired = float(holder.get("acquired_monotonic", 0) or 0)
-                if acquired and time.time() - acquired > self.stale_lock_seconds:
-                    logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'workspace', 'stale_lock_reclaimed', {'job_id': job_id, 'stale_holder': holder.get('job_id', 'unknown')})
+                holder_pid = int(holder.get("pid", 0) or 0)
+                holder_is_dead = holder_pid > 0 and not self._process_exists(holder_pid)
+                lock_expired = (
+                    acquired > 0
+                    and time.time() - acquired > self.stale_lock_seconds
+                )
+                if holder_is_dead or lock_expired:
+                    logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'workspace', 'stale_lock_reclaimed', {'job_id': job_id, 'stale_holder': holder.get('job_id', 'unknown'), 'holder_pid': holder_pid, 'reason': 'owner_process_dead' if holder_is_dead else 'lock_expired'})
                     lock_file.unlink(missing_ok=True)
                     continue
                 raise WorkspaceLockedError(repo_path, holder) from None
+
+    def _process_exists(self, pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
 
     def _read_lock(self, lock_file: Path) -> dict[str, object]:
         try:

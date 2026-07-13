@@ -49,6 +49,7 @@ from worktop.test_agent.app.services.spec_placement_service import SpecPlacement
 from worktop.test_agent.app.services.technology_intelligence_service import TechnologyIntelligenceService
 from worktop.test_agent.app.services.test_action_service import TestActionService
 from worktop.test_agent.app.services.test_value_service import TestValueService
+from worktop.test_agent.app.tools.playwright_parser_tool import PlaywrightParserTool
 from worktop.test_agent.app.services.traceability_service import TraceabilityService
 from worktop.test_agent.app.schemas.validation_result import ValidationCheck, ValidationResult
 from worktop.test_agent.app.workspace.workspace_manager import JobWorkspace, WorkspaceManager
@@ -239,11 +240,22 @@ class GenerationOrchestrator:
             )
 
             placement = self._normalize_bootstrap_placement(repo_profile, placement)
+            target_behavior = self._behavior_for_placement(placement, behavior)
+            logger.info(
+                "[playwright-generation] stage=context_scope status=selected "
+                "target_spec=%s create_new=%s target_tests=%s repository_tests=%s",
+                placement.target_spec_file,
+                placement.create_new,
+                [unit.test_title for unit in target_behavior],
+                len(behavior),
+            )
 
             action = self._run_stage(
                 request.job_id,
                 "test_action_decision",
-                lambda: test_action.decide(placement, behavior, intent, ui_context, request.repo_path),
+                lambda: test_action.decide(
+                    placement, target_behavior, intent, ui_context, request.repo_path
+                ),
                 completed=lambda decision: {
                     "action": decision.action,
                     "target_test": decision.target_test_title or "none",
@@ -264,7 +276,9 @@ class GenerationOrchestrator:
             existing_test_context = self._run_stage(
                 request.job_id,
                 "existing_test_context",
-                lambda: self._resolve_existing_test_context(placement, action, behavior),
+                lambda: self._resolve_existing_test_context(
+                    placement, action, target_behavior
+                ),
                 completed=lambda target: {
                     "selected": target is not None,
                     "file": target.file_path if target else "none",
@@ -277,11 +291,19 @@ class GenerationOrchestrator:
             anchor_flow_context = self._run_stage(
                 request.job_id,
                 "anchor_flow_context",
-                lambda: self._resolve_anchor_flow_context(placement, action, behavior),
+                lambda: self._resolve_anchor_flow_context(
+                    placement,
+                    action,
+                    behavior,
+                    request.repo_path,
+                    intent,
+                    test_action.ranking_agent,
+                ),
                 completed=lambda anchor: {
                     "selected": anchor is not None,
                     "file": anchor.file_path if anchor else "none",
                     "anchor_test": anchor.anchor_test_title if anchor else "none",
+                    "describe": anchor.describe_title if anchor else "none",
                 },
             )
 
@@ -304,9 +326,28 @@ class GenerationOrchestrator:
             locator_decisions = self._run_optional_stage(
                 request.job_id,
                 "locator_reasoning",
-                lambda: locators.decide(source),
+                lambda: self._decide_locators_with_context(
+                    locators,
+                    source,
+                    action,
+                    anchor_flow_context,
+                    intent,
+                    ui_context,
+                    placement.target_spec_file,
+                ),
             )
 
+            logger.info(
+                "[playwright-generation] stage=code_generation context "
+                "target_spec=%s action=%s extension_target=%s anchor=%s describe=%s "
+                "locator_decisions=%s",
+                placement.target_spec_file,
+                action.action,
+                existing_test_context.test_title if existing_test_context else "none",
+                anchor_flow_context.anchor_test_title if anchor_flow_context else "none",
+                anchor_flow_context.describe_title if anchor_flow_context else "none",
+                len(locator_decisions or []),
+            )
             patches = self._run_stage(
                 request.job_id,
                 "code_generation",
@@ -330,8 +371,16 @@ class GenerationOrchestrator:
             patches = self._run_stage(
                 request.job_id,
                 "critic_review",
-                lambda: critic.review(patches, ui_context),
+                lambda: critic.review(
+                    patches, ui_context, anchor_flow_context, locator_decisions
+                ),
                 completed=lambda reviewed: {"patches": len(reviewed.patches)},
+            )
+            self._bind_append_to_anchor_describe(
+                patches, anchor_flow_context, request.repo_path
+            )
+            self._bind_extension_target(
+                patches, existing_test_context, request.repo_path
             )
 
             if repo_profile.requires_bootstrap:
@@ -349,10 +398,14 @@ class GenerationOrchestrator:
                     },
                 )
 
-            test_value_report = self._run_optional_stage(
-                request.job_id,
-                "test_value_analysis",
-                lambda: self.test_value.evaluate(patches, behavior),
+            test_value_report = (
+                self._run_optional_stage(
+                    request.job_id,
+                    "test_value_analysis",
+                    lambda: self.test_value.evaluate(patches, target_behavior),
+                )
+                if settings.enable_extended_reporting
+                else None
             )
             if test_value_report is not None:
                 review_reasons.extend(
@@ -372,6 +425,7 @@ class GenerationOrchestrator:
                 anchor_flow_context=anchor_flow_context,
                 flow_plan=flow_plan,
                 ownership_resolution=ownership_resolution,
+                locator_decisions=locator_decisions,
                 requires_bootstrap=repo_profile.requires_bootstrap,
                 critic=critic,
                 repair=repair,
@@ -381,13 +435,19 @@ class GenerationOrchestrator:
             )
 
             coverage_report = self._assess_coverage_preservation(
-                request, patches, patch_result, behavior, review_reasons
+                request, patches, patch_result, target_behavior, review_reasons
             )
 
-            traceability_matrix = self._run_optional_stage(
-                request.job_id,
-                "requirement_traceability",
-                lambda: self.traceability.build(request, intent, patches, behavior),
+            traceability_matrix = (
+                self._run_optional_stage(
+                    request.job_id,
+                    "requirement_traceability",
+                    lambda: self.traceability.build(
+                        request, intent, patches, target_behavior
+                    ),
+                )
+                if settings.enable_extended_reporting
+                else None
             )
             if traceability_matrix is not None:
                 review_reasons.extend(
@@ -413,7 +473,7 @@ class GenerationOrchestrator:
                     ],
                     patches=patches,
                 ),
-            )
+            ) if settings.enable_extended_reporting else None
 
             budget_report = budget.report()
             if budget_report.review_required:
@@ -441,7 +501,7 @@ class GenerationOrchestrator:
                     traceability=traceability_matrix,
                     review_reasons=review_reasons,
                 ),
-            )
+            ) if settings.enable_extended_reporting else None
 
             decision_trace = [
                 trace
@@ -619,6 +679,7 @@ class GenerationOrchestrator:
         anchor_flow_context: AnchorFlowContext | None = None,
         flow_plan: Any | None = None,
         ownership_resolution: Any | None = None,
+        locator_decisions: Any | None = None,
         requires_bootstrap: bool = False,
         policy: RepositoryPolicy | None = None,
         budget: GenerationBudget | None = None,
@@ -626,6 +687,15 @@ class GenerationOrchestrator:
     ) -> tuple[PatchWriteResult, ValidationResult | None, PatchSet]:
         patch_result = PatchWriteResult()
         max_attempts = max(settings.max_repair_attempts, 0)
+        logger.info(
+            "[playwright-generation] stage=patch_integration context "
+            "target_paths=%s operations=%s extension_target=%s anchor=%s describe=%s",
+            [patch.path for patch in patches.patches],
+            [patch.operation for patch in patches.patches],
+            existing_test_context.test_title if existing_test_context else "none",
+            anchor_flow_context.anchor_test_title if anchor_flow_context else "none",
+            anchor_flow_context.describe_title if anchor_flow_context else "none",
+        )
         plan_validation = self._validate_patch_plan(
             request,
             patches,
@@ -647,6 +717,7 @@ class GenerationOrchestrator:
                 anchor_flow_context=anchor_flow_context,
                 flow_plan=flow_plan,
                 ownership_resolution=ownership_resolution,
+                locator_decisions=locator_decisions,
                 requires_bootstrap=requires_bootstrap,
                 critic=critic,
                 repair=repair,
@@ -682,7 +753,9 @@ class GenerationOrchestrator:
             repaired_patches = self._run_stage(
                 request.job_id,
                 "repair_generation",
-                lambda current=patches, failed=validation: repair.repair(current, failed),
+                lambda current=patches, failed=validation: repair.repair(
+                    current, failed, anchor_flow_context, locator_decisions
+                ),
                 started={"attempt": attempt},
                 completed=lambda patch_set: {
                     "attempt": attempt,
@@ -693,7 +766,9 @@ class GenerationOrchestrator:
             patches = self._run_stage(
                 request.job_id,
                 "repair_critic_review",
-                lambda current=repaired_patches: critic.review(current, ui_context),
+                lambda current=repaired_patches: critic.review(
+                    current, ui_context, anchor_flow_context, locator_decisions
+                ),
                 started={"attempt": attempt},
                 completed=lambda reviewed: {
                     "attempt": attempt,
@@ -735,7 +810,57 @@ class GenerationOrchestrator:
                 started={"reason": "policy_rollback_failed_patch"},
             )
             patch_result = PatchWriteResult()
+        else:
+            logger.warning(
+                "[playwright-generation] stage=failed_patch_retention status=retained "
+                "job_id=%s paths=%s failed_checks=%s reason=debug_inspection "
+                "rollback=false",
+                request.job_id,
+                [patch.path for patch in patch_result.applied],
+                [check.name for check in validation.checks if not check.passed],
+            )
         return patch_result, validation, patches
+
+    def _behavior_for_placement(
+        self,
+        placement: Any,
+        candidates: list[BehavioralTestUnit],
+    ) -> list[BehavioralTestUnit]:
+        """After placement, keep existing-file reasoning inside that spec."""
+        if placement.create_new:
+            return candidates
+        target = str(PurePosixPath(placement.target_spec_file or "")).removeprefix("./")
+        return [
+            candidate
+            for candidate in candidates
+            if str(PurePosixPath(candidate.file_path)).removeprefix("./") == target
+        ]
+
+    def _decide_locators_with_context(
+        self,
+        locator_agent: Any,
+        source: Any,
+        action: TestActionDecision,
+        anchor: AnchorFlowContext | None,
+        intent: Any,
+        ui_context: PlaywrightUiContext,
+        target_spec: str,
+    ) -> Any:
+        logger.info(
+            "[playwright-generation] stage=locator_reasoning context "
+            "target_spec=%s action=%s anchor=%s anchor_describe=%s",
+            target_spec,
+            action.action,
+            anchor.anchor_test_title if anchor else "none",
+            anchor.describe_title if anchor else "none",
+        )
+        return locator_agent.decide(
+            source,
+            action=action,
+            anchor=anchor,
+            intent=intent,
+            ui_context=ui_context,
+        )
 
     def _resolve_existing_test_context(
         self,
@@ -749,29 +874,28 @@ class GenerationOrchestrator:
 
         target_spec = placement.target_spec_file
         target_title = action.target_test_title
+        target_file = action.target_file_path or target_spec
+        target_start = action.target_start_line
+        normalized_target = str(PurePosixPath(target_spec or "")).removeprefix("./")
+        normalized_action_file = str(PurePosixPath(target_file or "")).removeprefix("./")
+        normalized_title = self._normalize_test_title(target_title)
         matches = [
             candidate
             for candidate in candidates
-            if candidate.test_title == target_title
-            and (not target_spec or candidate.file_path == target_spec)
+            if self._normalize_test_title(candidate.test_title) == normalized_title
+            and (
+                not target_file
+                or str(PurePosixPath(candidate.file_path)).removeprefix("./")
+                == normalized_action_file
+            )
+            and (target_start is None or candidate.start_line == target_start)
         ]
-        if not matches and target_title:
-            matches = [
-                candidate for candidate in candidates if candidate.test_title == target_title
-            ]
-        if not matches and target_spec:
-            matches = [candidate for candidate in candidates if candidate.file_path == target_spec]
-        if not matches and candidates:
-            matches = [candidates[0]]
         if not matches:
-            logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'existing_test_context', 'missing', {'target_spec': target_spec or 'none', 'target_test': target_title or 'none'})
+            logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'existing_test_context', 'missing', {'target_spec': normalized_target or 'none', 'target_test': target_title or 'none', 'target_file': normalized_action_file or 'none', 'target_start_line': target_start, 'available_tests': [(candidate.file_path, candidate.test_title, candidate.start_line) for candidate in candidates]})
             return None
 
         selected = matches[0]
-        if selected.test_title != target_title:
-            logger.log(logging.WARNING, "[playwright-generation] stage=%s | status=%s | details=%s", 'existing_test_context', 'fallback_selected', {'requested_title': target_title or 'none', 'selected_title': selected.test_title, 'file': selected.file_path, 'lines': f'{selected.start_line}-{selected.end_line}'})
-        else:
-            logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'existing_test_context', 'selected', {'file': selected.file_path, 'test_title': selected.test_title, 'lines': f'{selected.start_line}-{selected.end_line}'})
+        logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'existing_test_context', 'selected', {'file': selected.file_path, 'test_title': selected.test_title, 'lines': f'{selected.start_line}-{selected.end_line}'})
 
         return ExistingTestContext(
             file_path=selected.file_path,
@@ -784,6 +908,9 @@ class GenerationOrchestrator:
             behavior_summary=selected.behavior_summary,
             source_excerpt=selected.source_excerpt,
         )
+
+    def _normalize_test_title(self, title: str | None) -> str:
+        return " ".join((title or "").strip().lower().split())
 
     def _normalize_bootstrap_placement(
         self,
@@ -984,27 +1111,43 @@ class GenerationOrchestrator:
         placement: Any,
         action: TestActionDecision,
         candidates: list[BehavioralTestUnit],
+        repo_path: str = "",
+        intent: Any | None = None,
+        ranking_agent: Any | None = None,
     ) -> AnchorFlowContext | None:
         """Pick a sibling test in the target spec to seed an appended test's flow.
 
-        For ``append_new_test`` the new test should reuse the proven
-        setup/auth/navigation/fixtures/page objects of an existing sibling in
-        ``target_spec_file`` rather than reinvent them. For ``create_new_spec`` the
-        richest test anywhere in the repository serves as a style/setup template for
-        the new spec; when the repository has no candidates at all, generation falls
-        back to the Playwright best-practices scaffold in the prompt. In both cases
-        the anchor is the candidate with the richest reusable setup (most page
-        objects + fixtures), tie-broken by the longest source excerpt and then
-        earliest position, and it is a reference only — never patched.
+        For ``append_new_test``, parse only the placement-selected suite and rank its
+        tests against the requested intent to select the best setup/style reference. For
+        ``create_new_spec``, the repository behavior inventory remains useful for
+        selecting a style template. The anchor is reference-only and is never patched.
         """
         if action.action == TestActions.APPEND_NEW_TEST:
-            pool = [
-                candidate
-                for candidate in candidates
-                if candidate.file_path == placement.target_spec_file
-            ]
-            pool_description = "sibling test(s) in the target spec"
-            empty_reason = "no_sibling_in_target_spec"
+            target = Path(repo_path) / placement.target_spec_file
+            if not target.is_file():
+                logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'anchor_flow_context', 'target_missing', {'target_spec': placement.target_spec_file})
+                return None
+            pool = PlaywrightParserTool().extract_tests(
+                placement.target_spec_file,
+                target.read_text(encoding="utf-8", errors="ignore"),
+            )
+            if not pool:
+                logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'anchor_flow_context', 'no_tests_in_target_spec', {'target_spec': placement.target_spec_file})
+                return None
+            ranked = ranking_agent.rank(pool, intent) if ranking_agent is not None else []
+            if ranked:
+                anchor = ranked[0]
+                rationale = (
+                    f"Selected agent-ranked test '{anchor.test_title}' from the "
+                    f"placement-selected suite {placement.target_spec_file} as the best "
+                    "anchor for the requested behavior."
+                )
+            else:
+                anchor = min(pool, key=lambda unit: unit.start_line)
+                rationale = (
+                    f"Selected deterministic fallback test '{anchor.test_title}' from "
+                    f"the placement-selected suite {placement.target_spec_file}."
+                )
         elif action.action == TestActions.CREATE_NEW_SPEC:
             pool = list(candidates)
             pool_description = "existing test(s) across the repository"
@@ -1013,23 +1156,23 @@ class GenerationOrchestrator:
             logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'anchor_flow_context', 'skipped', {'action': action.action})
             return None
 
-        if not pool:
+        if action.action == TestActions.CREATE_NEW_SPEC and not pool:
             logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'anchor_flow_context', empty_reason, {'target_spec': placement.target_spec_file})
             return None
-
-        anchor = max(
-            pool,
-            key=lambda unit: (
-                len(unit.page_objects) + len(unit.fixtures),
-                len(unit.source_excerpt),
-                -unit.start_line,
-            ),
-        )
-        rationale = (
-            f"Selected '{anchor.test_title}' from {anchor.file_path} as the richest "
-            f"reusable setup ({len(anchor.page_objects)} page object(s), "
-            f"{len(anchor.fixtures)} fixture(s)) among {len(pool)} {pool_description}."
-        )
+        if action.action == TestActions.CREATE_NEW_SPEC:
+            anchor = max(
+                pool,
+                key=lambda unit: (
+                    len(unit.page_objects) + len(unit.fixtures),
+                    len(unit.source_excerpt),
+                    -unit.start_line,
+                ),
+            )
+            rationale = (
+                f"Selected '{anchor.test_title}' from {anchor.file_path} as the richest "
+                f"reusable setup ({len(anchor.page_objects)} page object(s), "
+                f"{len(anchor.fixtures)} fixture(s)) among {len(pool)} {pool_description}."
+            )
         logger.log(logging.INFO, "[playwright-generation] stage=%s | status=%s | details=%s", 'anchor_flow_context', 'selected', {'file': anchor.file_path, 'anchor_test': anchor.test_title, 'page_objects': len(anchor.page_objects), 'fixtures': len(anchor.fixtures), 'pool': len(pool)})
         return AnchorFlowContext(
             file_path=anchor.file_path,
@@ -1121,8 +1264,11 @@ class GenerationOrchestrator:
         requires_bootstrap: bool = False,
         policy: RepositoryPolicy | None = None,
     ) -> ValidationResult:
+        self._bind_append_to_anchor_describe(patches, anchor_flow_context, repo_path)
+        self._bind_extension_target(patches, existing_test_context, repo_path)
         checks = [
             self._extension_patch_check(patches, existing_test_context, flow_plan),
+            self._append_integration_check(patches, repo_path, anchor_flow_context),
             self._append_reuse_check(patches, anchor_flow_context),
             self._reference_integrity_check(patches, repo_path),
             self._ownership_emission_check(patches, ownership),
@@ -1131,10 +1277,168 @@ class GenerationOrchestrator:
         ]
         if policy is not None:
             checks.extend(self.policy.checks(patches, policy))
+        append_reuse = next(
+            (check for check in checks if check.name == "append_flow_reuse"), None
+        )
+        if append_reuse is not None and (
+            "warning" in append_reuse.output.lower()
+            or not append_reuse.passed
+        ):
+            logger.warning(
+                "[playwright-generation] stage=append_flow_reuse status=advisory "
+                "blocking=false target_spec=%s anchor=%s reason=%s",
+                anchor_flow_context.file_path if anchor_flow_context else "none",
+                anchor_flow_context.anchor_test_title if anchor_flow_context else "none",
+                append_reuse.output,
+            )
+        blocking_checks = [
+            check for check in checks if check.name != "append_flow_reuse"
+        ]
         return ValidationResult(
-            passed=all(check.passed for check in checks),
+            passed=all(check.passed for check in blocking_checks),
             checks=checks,
         )
+
+    def _append_integration_check(
+        self,
+        patches: PatchSet,
+        repo_path: str,
+        anchor: AnchorFlowContext | None = None,
+    ) -> ValidationCheck:
+        append_patches = [
+            patch
+            for patch in patches.patches
+            if patch.operation in {"append", "append_test"}
+            and (anchor is None or patch.path == anchor.file_path)
+            and patch.path.endswith((".spec.ts", ".spec.tsx", ".test.ts", ".test.tsx", ".e2e.ts", ".e2e.tsx"))
+        ]
+        if not append_patches:
+            return ValidationCheck(
+                name="append_integration",
+                passed=True,
+                output="No append patch requires integration validation.",
+            )
+        if len(append_patches) != 1:
+            return ValidationCheck(
+                name="append_integration",
+                passed=False,
+                output="Generation must contain exactly one append patch.",
+            )
+
+        patch = append_patches[0]
+        path = Path(repo_path) / patch.path
+        if not path.is_file():
+            return ValidationCheck(
+                name="append_integration",
+                passed=False,
+                output=f"Append target does not exist: {patch.path}",
+            )
+
+        parser = PlaywrightParserTool()
+        existing = parser.extract_tests(patch.path, path.read_text(encoding="utf-8"))
+        generated = parser.extract_tests(patch.path, patch.content)
+        findings: list[str] = []
+        if len(generated) != 1:
+            findings.append("Append content must contain exactly one complete test block.")
+        elif generated[0].test_title in {test.test_title for test in existing}:
+            findings.append(
+                f"Test title '{generated[0].test_title}' already exists in {patch.path}; "
+                "rename only the generated test and preserve its behavior."
+            )
+
+        describes = parser.extract_describes(
+            patch.path,
+            path.read_text(encoding="utf-8"),
+        )
+        if patch.operation == "append_test":
+            matching_describes = [
+                block
+                for block in describes
+                if block.title == patch.target_describe_title
+            ]
+            if len(matching_describes) != 1:
+                findings.append(
+                    "append_test must identify exactly one target describe block."
+                )
+        elif patch.start_line is None and len(describes) != 1:
+            findings.append(
+                "Append target must have exactly one describe block when start_line is omitted."
+            )
+        elif patch.start_line is not None and not any(
+            block.start_line < patch.start_line <= block.end_line for block in describes
+        ):
+            findings.append("Append start_line must select a describe block in the target file.")
+
+        return ValidationCheck(
+            name="append_integration",
+            passed=not findings,
+            output="\n".join(findings)
+            if findings
+            else f"Generated test is unique and targets a describe block in {patch.path}.",
+        )
+
+    def _bind_append_to_anchor_describe(
+        self,
+        patches: PatchSet,
+        anchor: AnchorFlowContext | None,
+        repo_path: str,
+    ) -> None:
+        if anchor is None:
+            return
+        append_patches = [
+            patch
+            for patch in patches.patches
+            if patch.operation in {"append", "append_test"} and patch.path == anchor.file_path
+        ]
+        if len(append_patches) != 1:
+            return
+        patch = append_patches[0]
+        patch.operation = "append_test"
+        patch.target_describe_title = anchor.describe_title
+        patch.start_line = None
+        path = Path(repo_path) / patch.path
+        if not path.is_file():
+            return
+        describes = PlaywrightParserTool().extract_describes(
+            patch.path,
+            path.read_text(encoding="utf-8", errors="ignore"),
+        )
+        matching = [block for block in describes if block.title == anchor.describe_title]
+        if len(matching) != 1:
+            return
+
+    def _bind_extension_target(
+        self,
+        patches: PatchSet,
+        context: ExistingTestContext | None,
+        repo_path: str,
+    ) -> None:
+        if context is None:
+            return
+        matching = [
+            patch
+            for patch in patches.patches
+            if patch.path == context.file_path
+            and patch.operation in {"replace", "replace_test"}
+        ]
+        if len(matching) != 1:
+            return
+        patch = matching[0]
+        target = Path(repo_path) / context.file_path
+        if not target.is_file():
+            return
+        _, _, source = PlaywrightParserTool().find_test_block(
+            context.file_path,
+            target.read_text(encoding="utf-8", errors="ignore"),
+            context.test_title,
+            context.describe_title,
+        )
+        patch.operation = "replace_test"
+        patch.start_line = None
+        patch.end_line = None
+        patch.target_test_title = context.test_title
+        patch.target_describe_title = context.describe_title
+        patch.expected_source = source
 
     def _extension_patch_check(
         self,
@@ -1155,23 +1459,22 @@ class GenerationOrchestrator:
         findings: list[str] = []
         if not matching_patches:
             findings.append(
-                "extend_existing_test must patch "
-                f"{existing_test_context.file_path} at lines "
-                f"{existing_test_context.start_line}-{existing_test_context.end_line}"
+                "extend_existing_test must structurally replace the selected test in "
+                f"{existing_test_context.file_path}"
             )
         exact_replacements = [
             patch
             for patch in matching_patches
-            if patch.operation == "replace"
-            and patch.start_line == existing_test_context.start_line
-            and patch.end_line == existing_test_context.end_line
+            if patch.operation == "replace_test"
+            and patch.target_test_title == existing_test_context.test_title
+            and patch.target_describe_title == existing_test_context.describe_title
+            and bool(patch.expected_source)
         ]
         if matching_patches and not exact_replacements:
             findings.append(
-                "extend_existing_test requires an exact replace patch for "
-                f"{existing_test_context.file_path}:{existing_test_context.start_line}-"
-                f"{existing_test_context.end_line}; generated ranges were "
-                f"{[(patch.operation, patch.start_line, patch.end_line) for patch in matching_patches]}"
+                "extend_existing_test requires replace_test bound to the selected "
+                f"describe/title in {existing_test_context.file_path}; generated targets were "
+                f"{[(patch.operation, patch.target_describe_title, patch.target_test_title) for patch in matching_patches]}"
             )
         for patch in exact_replacements:
             if existing_test_context.test_title not in patch.content:
@@ -1191,9 +1494,10 @@ class GenerationOrchestrator:
             output="\n".join(findings)
             if findings
             else (
-                "Existing test extension patch targets the selected block exactly: "
-                f"{existing_test_context.file_path}:"
-                f"{existing_test_context.start_line}-{existing_test_context.end_line}"
+                "Existing test extension patch is structurally bound to: "
+                f"{existing_test_context.file_path} :: "
+                f"{existing_test_context.describe_title or '<root>'} :: "
+                f"{existing_test_context.test_title}"
             ),
         )
 
@@ -1244,13 +1548,6 @@ class GenerationOrchestrator:
                 if fixture not in generic_fixtures
             ],
         ]
-        if not reusable_signals:
-            return ValidationCheck(
-                name="append_flow_reuse",
-                passed=True,
-                output="Anchor flow has no reusable page objects or non-generic fixtures.",
-            )
-
         matching_patches = [
             patch for patch in patches.patches if patch.path == anchor_flow_context.file_path
         ]
@@ -1264,16 +1561,77 @@ class GenerationOrchestrator:
             )
 
         combined_content = "\n".join(patch.content for patch in matching_patches)
+        anchor_marker = f"// Anchor flow: {anchor_flow_context.anchor_test_title}"
+        end_marker = "// End anchor flow; new scenario steps begin below."
+        if anchor_marker not in combined_content or end_marker not in combined_content:
+            return ValidationCheck(
+                name="append_flow_reuse",
+                passed=True,
+                output=(
+                    "Non-blocking anchor reuse warning: append_new_test should identify the anchor with "
+                    f"`{anchor_marker}` and mark its reuse boundary with `{end_marker}`."
+                ),
+            )
+        anchor_lines = [
+            " ".join(line.strip().split())
+            for line in (anchor_flow_context.source_excerpt or "").splitlines()[1:-1]
+            if line.strip()
+        ]
+        generated_lines = [
+            " ".join(line.strip().split())
+            for line in combined_content.splitlines()
+            if line.strip()
+        ]
+        anchor_start = next(
+            (
+                index
+                for index in range(len(generated_lines) - len(anchor_lines) + 1)
+                if generated_lines[index : index + len(anchor_lines)] == anchor_lines
+            ),
+            None,
+        ) if anchor_lines else None
+        if anchor_lines and anchor_start is None:
+            return ValidationCheck(
+                name="append_flow_reuse",
+                passed=True,
+                output=(
+                    "Non-blocking anchor reuse warning: append_new_test should preserve the anchor's inner flow as one "
+                    "uninterrupted block before adding the new scenario steps."
+                ),
+            )
+        marker_line = generated_lines.index(anchor_marker)
+        end_marker_line = generated_lines.index(end_marker)
+        if marker_line > end_marker_line:
+            return ValidationCheck(
+                name="append_flow_reuse",
+                passed=True,
+                output="Non-blocking anchor reuse warning: anchor flow markers are out of order.",
+            )
+        if anchor_start is not None and not (
+            marker_line < anchor_start
+            and anchor_start + len(anchor_lines) <= end_marker_line
+        ):
+            return ValidationCheck(
+                name="append_flow_reuse",
+                passed=True,
+                output="Non-blocking anchor reuse warning: anchor comments should surround the preserved flow block.",
+            )
+        if not reusable_signals:
+            return ValidationCheck(
+                name="append_flow_reuse",
+                passed=True,
+                output="Appended test preserves the anchor flow as an uninterrupted block.",
+            )
         reused = [signal for signal in reusable_signals if signal in combined_content]
-        passed = bool(reused)
         return ValidationCheck(
             name="append_flow_reuse",
-            passed=passed,
+            passed=True,
             output=(
                 f"Appended test reuses anchor setup signals: {reused}"
-                if passed
+                if reused
                 else (
-                    "append_new_test must reuse the anchor flow's proven setup; the "
+                    "Non-blocking anchor reuse warning: append_new_test should reuse "
+                    "the anchor flow's proven setup; the "
                     "generated test references none of its page objects or non-generic "
                     f"fixtures {reusable_signals} and appears to reinvent the flow."
                 )
@@ -1510,6 +1868,7 @@ class GenerationOrchestrator:
         anchor_flow_context: AnchorFlowContext | None = None,
         flow_plan: Any | None = None,
         ownership_resolution: Any | None = None,
+        locator_decisions: Any | None = None,
         requires_bootstrap: bool = False,
         policy: RepositoryPolicy | None = None,
         budget: GenerationBudget | None = None,
@@ -1521,7 +1880,9 @@ class GenerationOrchestrator:
             repaired_patches = self._run_stage(
                 request.job_id,
                 "repair_generation",
-                lambda current=patches, failed=validation: repair.repair(current, failed),
+                lambda current=patches, failed=validation: repair.repair(
+                    current, failed, anchor_flow_context, locator_decisions
+                ),
                 started={"attempt": attempt, "reason": "patch_plan_guard"},
                 completed=lambda patch_set: {
                     "attempt": attempt,
@@ -1532,7 +1893,9 @@ class GenerationOrchestrator:
             patches = self._run_stage(
                 request.job_id,
                 "repair_critic_review",
-                lambda current=repaired_patches: critic.review(current, ui_context),
+                lambda current=repaired_patches: critic.review(
+                    current, ui_context, anchor_flow_context, locator_decisions
+                ),
                 started={"attempt": attempt, "reason": "patch_plan_guard"},
                 completed=lambda reviewed: {
                     "attempt": attempt,

@@ -61,6 +61,8 @@ class TestActionDecisionAgent(BaseAgent):
         return TestActionDecision(
             action=action,
             target_test_title=target_test_title,
+            target_file_path=(ranked_tests[0].file_path if ranked_tests and target_test_title else None),
+            target_start_line=(ranked_tests[0].start_line if ranked_tests and target_test_title else None),
             confidence=0.35,
             decision_trace=DecisionTrace(
                 decision=action,

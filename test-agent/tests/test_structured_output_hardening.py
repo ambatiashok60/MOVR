@@ -274,20 +274,115 @@ def _anchor_unit(title: str, line: int, page_objects=None, fixtures=None) -> Beh
     )
 
 
-def test_anchor_flow_context_picks_richest_sibling_for_append() -> None:
+def test_anchor_flow_context_reads_only_placement_selected_file(tmp_path) -> None:
+    target = tmp_path / "tests" / "plans.spec.ts"
+    target.parent.mkdir()
+    target.write_text(
+        """import { test } from '@playwright/test';
+test.describe('plans', () => {
+  test('first', async ({ page }) => { await page.goto('/plans'); });
+  test('second', async ({ page }) => { await page.goto('/plans/2'); });
+});
+""",
+        encoding="utf-8",
+    )
     orchestrator = GenerationOrchestrator()
     anchor = orchestrator._resolve_anchor_flow_context(
         placement=SpecPlacementDecision(target_spec_file="tests/plans.spec.ts", create_new=False),
         action=PlaywrightTestActionDecision(action="append_new_test"),
         candidates=[
-            _anchor_unit("bare", 1),
             _anchor_unit("rich", 10, page_objects=["LoginPage", "PlanPage"], fixtures=["page", "storageState"]),
         ],
+        repo_path=str(tmp_path),
     )
     assert anchor is not None
-    assert anchor.anchor_test_title == "rich"
-    assert anchor.page_objects == ["LoginPage", "PlanPage"]
-    assert "richest reusable setup" in anchor.rationale
+    assert anchor.anchor_test_title == "first"
+    assert "placement-selected suite" in anchor.rationale
+
+
+def test_behavior_after_placement_is_scoped_to_selected_spec() -> None:
+    orchestrator = GenerationOrchestrator()
+    selected = _anchor_unit("selected", 1)
+    unrelated = selected.model_copy(
+        update={"file_path": "tests/unrelated.spec.ts", "test_title": "unrelated"}
+    )
+
+    scoped = orchestrator._behavior_for_placement(
+        SpecPlacementDecision(
+            target_spec_file="./tests/plans.spec.ts", create_new=False
+        ),
+        [unrelated, selected],
+    )
+
+    assert scoped == [selected]
+
+
+def test_existing_context_does_not_fall_back_to_another_test() -> None:
+    orchestrator = GenerationOrchestrator()
+    context = orchestrator._resolve_existing_test_context(
+        SpecPlacementDecision(
+            target_spec_file="tests/plans.spec.ts", create_new=False
+        ),
+        PlaywrightTestActionDecision(
+            action="extend_existing_test", target_test_title="missing title"
+        ),
+        [_anchor_unit("different test", 1)],
+    )
+
+    assert context is None
+
+
+def test_extend_decision_carries_stable_selected_test_identity() -> None:
+    from worktop.test_agent.app.services.test_action_service import TestActionService
+
+    candidate = _anchor_unit("Opens   Plan", 12)
+    decision = TestActionService()._bind_selected_test_identity(
+        PlaywrightTestActionDecision(
+            action="extend_existing_test", target_test_title=" opens plan "
+        ),
+        [candidate],
+    )
+
+    assert decision.target_test_title == candidate.test_title
+    assert decision.target_file_path == candidate.file_path
+    assert decision.target_start_line == candidate.start_line
+
+
+def test_anchor_flow_context_uses_agent_ranking_within_target_file(tmp_path) -> None:
+    target = tmp_path / "tests" / "plans.spec.ts"
+    target.parent.mkdir()
+    target.write_text(
+        """import { test } from '@playwright/test';
+test.describe('plans', () => {
+  test('opens a plan', async ({ page }) => { await page.goto('/plans'); });
+  test('saves a plan', async ({ page }) => { await page.goto('/plans/new'); });
+});
+""",
+        encoding="utf-8",
+    )
+
+    class RankingAgent:
+        def rank(self, candidates, intent):
+            assert {candidate.test_title for candidate in candidates} == {
+                "opens a plan",
+                "saves a plan",
+            }
+            return [candidates[1], candidates[0]]
+
+    anchor = GenerationOrchestrator()._resolve_anchor_flow_context(
+        placement=SpecPlacementDecision(
+            target_spec_file="tests/plans.spec.ts", create_new=False
+        ),
+        action=PlaywrightTestActionDecision(action="append_new_test"),
+        candidates=[_anchor_unit("unrelated repository test", 1)],
+        repo_path=str(tmp_path),
+        intent=object(),
+        ranking_agent=RankingAgent(),
+    )
+
+    assert anchor is not None
+    assert anchor.anchor_test_title == "saves a plan"
+    assert "agent-ranked" in anchor.rationale
 
 
 def test_anchor_flow_context_skipped_for_non_append() -> None:
@@ -300,12 +395,16 @@ def test_anchor_flow_context_skipped_for_non_append() -> None:
     assert anchor is None
 
 
-def test_anchor_flow_context_none_when_no_sibling_in_target_spec() -> None:
+def test_anchor_flow_context_none_when_target_suite_has_no_tests(tmp_path) -> None:
+    target = tmp_path / "tests" / "other.spec.ts"
+    target.parent.mkdir()
+    target.write_text("import { test } from '@playwright/test';\n", encoding="utf-8")
     orchestrator = GenerationOrchestrator()
     anchor = orchestrator._resolve_anchor_flow_context(
         placement=SpecPlacementDecision(target_spec_file="tests/other.spec.ts", create_new=False),
         action=PlaywrightTestActionDecision(action="append_new_test"),
         candidates=[_anchor_unit("rich", 10, page_objects=["LoginPage"])],
+        repo_path=str(tmp_path),
     )
     assert anchor is None
 
@@ -324,9 +423,31 @@ def test_code_generation_prompt_includes_anchor_flow_and_append_rules() -> None:
         ),
     )
     assert "Anchor flow context:" in prompt
-    assert "reuse that sibling test's setup" in prompt
-    assert "the anchor is a reference only" in prompt
+    assert "copy that sibling test's setup" in prompt
+    assert "never edit or replace the original anchor test" in prompt
     assert "LoginPage" in prompt
+
+
+def test_locator_prompt_targets_only_new_append_actions() -> None:
+    from worktop.test_agent.app.prompts.locator_reasoning_prompt import build_locator_reasoning_prompt
+    from worktop.test_agent.app.schemas.behavioral_test_unit import AnchorFlowContext
+    from worktop.test_agent.app.schemas.source_intelligence import SourceIntelligence
+
+    prompt = build_locator_reasoning_prompt(
+        SourceIntelligence(),
+        action=PlaywrightTestActionDecision(action="append_new_test"),
+        anchor=AnchorFlowContext(
+            file_path="tests/plans.spec.ts",
+            describe_title="plans",
+            anchor_test_title="opens plan",
+            behavior_summary="Open an existing plan.",
+            source_excerpt="await planPage.open();",
+        ),
+    )
+
+    assert "return decisions only for new interactions" in prompt
+    assert "await planPage.open();" in prompt
+    assert "Preserve locators and page-object calls" in prompt
 
 
 def test_append_reuse_check_fails_when_no_overlap() -> None:
@@ -344,13 +465,19 @@ def test_append_reuse_check_fails_when_no_overlap() -> None:
             CodePatch(
                 path="tests/plans.spec.ts",
                 operation="append",
-                content="test('new', async ({ page }) => { await page.goto('/'); });",
+                content=(
+                    "test('new', async ({ page }) => {\n"
+                    "// Anchor flow: logs in and opens plan\n"
+                    "await page.goto('/');\n"
+                    "// End anchor flow; new scenario steps begin below.\n"
+                    "});"
+                ),
             )
         ]
     )
     check = orchestrator._append_reuse_check(patches, anchor)
-    assert check.passed is False
-    assert "reinvent the flow" in check.output
+    assert check.passed is True
+    assert "Non-blocking anchor reuse warning" in check.output
 
 
 def test_append_reuse_check_passes_when_anchor_page_object_reused() -> None:
@@ -368,7 +495,13 @@ def test_append_reuse_check_passes_when_anchor_page_object_reused() -> None:
             CodePatch(
                 path="tests/plans.spec.ts",
                 operation="append",
-                content="test('new', async ({ page }) => { const lp = new LoginPage(page); });",
+                content=(
+                    "test('new', async ({ page }) => {\n"
+                    "// Anchor flow: logs in and opens plan\n"
+                    "const lp = new LoginPage(page);\n"
+                    "// End anchor flow; new scenario steps begin below.\n"
+                    "});"
+                ),
             )
         ]
     )
@@ -1027,7 +1160,9 @@ def test_repair_loop_rolls_back_repairs_and_revalidates() -> None:
         patches=[
             CodePatch(
                 path="tests/example.spec.ts",
-                operation="append",
+                operation="replace",
+                start_line=1,
+                end_line=1,
                 content="bad",
             )
         ]
@@ -1036,7 +1171,9 @@ def test_repair_loop_rolls_back_repairs_and_revalidates() -> None:
         patches=[
             CodePatch(
                 path="tests/example.spec.ts",
-                operation="append",
+                operation="replace",
+                start_line=1,
+                end_line=1,
                 content="fixed",
             )
         ]
@@ -1152,7 +1289,7 @@ def test_code_generation_prompt_includes_existing_test_context_contract() -> Non
     )
 
     assert "Existing test context:" in prompt
-    assert "emit a replace patch for the exact Existing test context file_path" in prompt
+    assert "emit replace_test with the Existing test context file_path" in prompt
     assert '"start_line": 10' in prompt
     assert '"end_line": 18' in prompt
     assert "test('opens plan design'" in prompt
@@ -1361,7 +1498,7 @@ def test_unsafe_extension_action_downgrades_when_no_valid_context_exists() -> No
     assert action.decision_trace.decision == "append_new_test"
 
 
-def test_extension_patch_guard_repairs_before_writing_wrong_range() -> None:
+def test_extension_patch_guard_repairs_before_writing_wrong_range(tmp_path) -> None:
     orchestrator = GenerationOrchestrator()
     patch_writer = FakePatchWriter()
     validator = FakePassingValidator()
@@ -1394,9 +1531,21 @@ def test_extension_patch_guard_repairs_before_writing_wrong_range() -> None:
             )
         ]
     )
+    target = tmp_path / "tests" / "plans.spec.ts"
+    target.parent.mkdir()
+    target.write_text(
+        """import { test, expect } from '@playwright/test';
+test.describe('plans', () => {
+  test('opens plan design', async ({ page }) => {
+    await page.goto('/');
+  });
+});
+""",
+        encoding="utf-8",
+    )
     request = GenerationRequest(
         job_id="job-1",
-        repo_path="/tmp/repo",
+        repo_path=str(tmp_path),
         tenant_id="tenant-1",
         test_case_name="repair extension",
         run_validation=True,
@@ -1407,11 +1556,12 @@ def test_extension_patch_guard_repairs_before_writing_wrong_range() -> None:
         patches=initial,
         ui_context=PlaywrightUiContext(),
         existing_test_context=ExistingTestContext(
-            file_path="tests/plans.spec.ts",
-            test_title="opens plan design",
-            start_line=10,
-            end_line=18,
-            source_excerpt="test('opens plan design', async ({ page }) => {});",
+                file_path="tests/plans.spec.ts",
+                describe_title="plans",
+                test_title="opens plan design",
+                start_line=3,
+                end_line=5,
+                source_excerpt="test('opens plan design', async ({ page }) => { await page.goto('/'); });",
         ),
         critic=FakeCritic(),
         repair=FakeRepair(repaired),
@@ -1423,7 +1573,7 @@ def test_extension_patch_guard_repairs_before_writing_wrong_range() -> None:
     assert validation is not None
     assert validation.passed is True
     assert final_patches == repaired
-    assert patch_result.applied[0].operation == "replace"
+    assert patch_result.applied[0].operation == "replace_test"
 
 
 class FakePatchWriter:
@@ -1499,7 +1649,9 @@ class FakeRepair:
     def __init__(self, repaired: PatchSet) -> None:
         self.repaired = repaired
 
-    def repair(self, patches: PatchSet, validation: ValidationResult) -> PatchSet:
+    def repair(
+        self, patches: PatchSet, validation: ValidationResult, anchor=None, locator_decisions=None
+    ) -> PatchSet:
         return self.repaired
 
 
@@ -1508,6 +1660,8 @@ class FakeCritic:
         self,
         patches: PatchSet,
         ui_context: PlaywrightUiContext,
+        anchor=None,
+        locator_decisions=None,
     ) -> PatchSet:
         return patches
 
