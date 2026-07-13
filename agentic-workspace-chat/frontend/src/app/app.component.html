@@ -1,0 +1,102 @@
+<main class="shell">
+  <header class="topbar">
+    <div class="brand"><span class="mark">A</span><span>Arc</span><span class="tag">Workspace agent</span></div>
+    <div class="model"><span class="pulse"></span> Claude Sonnet 4.5 <span class="chevron">⌄</span></div>
+  </header>
+
+  <section class="workspace-bar">
+    <div class="pathbox">
+      <span class="folder">◇</span>
+      <input [(ngModel)]="workspacePath" (keyup.enter)="connect()" placeholder="Paste a local workspace path…">
+      <button (click)="connect()" [disabled]="busy">{{ workspace ? 'Change' : 'Connect' }}</button>
+    </div>
+    <div class="trust"><span>◆</span> Files stay on your machine</div>
+  </section>
+
+  <section class="app-grid">
+    <aside class="sidebar">
+      <div class="side-head">
+        <div><span class="eyebrow">WORKSPACE</span><strong>{{ workspace?.name || 'Not connected' }}</strong></div>
+        <span class="git" *ngIf="workspace">{{ workspace.isGit ? 'Git' : 'Folder' }}</span>
+      </div>
+      <div class="empty-files" *ngIf="!workspace">
+        <div class="empty-icon">⌁</div>
+        <p>Your file tree will appear here.</p>
+      </div>
+      <div class="file-list" *ngIf="workspace">
+        <label *ngFor="let file of files" [class.active]="selected.has(file)">
+          <input type="checkbox" [checked]="selected.has(file)" (change)="toggle(file)">
+          <span class="file-icon">▱</span><span class="file-name">{{ file }}</span>
+        </label>
+      </div>
+      <div class="context-count" *ngIf="workspace"><span>{{ selected.size }}</span> files in context</div>
+    </aside>
+
+    <section class="chat">
+      <div class="messages">
+        <div class="welcome" *ngIf="messages.length === 1">
+          <div class="orb"><span></span></div>
+          <h1>What are we building?</h1>
+          <p>I can explore your code, plan changes, and prepare edits for your review.</p>
+          <div class="suggestions">
+            <button (click)="prompt='Explain the architecture of this workspace'">Explain this codebase <span>→</span></button>
+            <button (click)="prompt='Find and fix the most important issue'">Find and fix an issue <span>→</span></button>
+            <button (click)="prompt='Add tests for the selected files'">Add meaningful tests <span>→</span></button>
+          </div>
+        </div>
+        <div class="message" *ngFor="let message of messages.slice(1)" [class.user]="message.role === 'user'">
+          <span class="avatar">{{ message.role === 'user' ? 'Y' : 'A' }}</span>
+          <div>{{ message.text }}</div>
+        </div>
+        <div class="thinking" *ngIf="busy && workspace"><i></i><i></i><i></i> Working through your workspace</div>
+        <div class="tool-trace" *ngIf="toolEvents.length">
+          <span *ngFor="let event of toolEvents">{{ event.status === 'success' ? '✓' : '!' }} {{ event.tool }}</span>
+        </div>
+      </div>
+
+      <div class="error" *ngIf="error">{{ error }}</div>
+      <div class="composer" [class.disabled]="!workspace">
+        <textarea [(ngModel)]="prompt" (keydown.meta.enter)="send()" rows="3"
+          [disabled]="!workspace" placeholder="Ask Arc to inspect, explain, or change your workspace…"></textarea>
+        <div class="compose-actions">
+          <div class="tools"><button title="Attach files">＋</button><span>⌘ Enter to send</span></div>
+          <button class="send" (click)="send()" [disabled]="!workspace || !prompt.trim() || busy">↑</button>
+        </div>
+      </div>
+      <p class="footnote">Changes are always shown as a diff before they touch your files.</p>
+    </section>
+
+    <aside class="review">
+      <div class="review-head"><div><span class="eyebrow">REVIEW</span><strong>Proposed changes</strong></div><span class="count">{{ proposal?.changes?.length || 0 }}</span></div>
+      <div class="review-empty" *ngIf="!proposal && !actions.length">
+        <div class="diff-art"><span class="minus">−</span><span class="plus">＋</span></div>
+        <h3>No changes yet</h3>
+        <p>When Arc proposes edits, review every file and hunk here before applying.</p>
+      </div>
+      <div class="action-proposals" *ngIf="actions.length && !proposal">
+        <article *ngFor="let action of actions">
+          <div class="action-title"><span>{{ action.persistent ? 'Reusable tool' : 'One-run tool' }}</span><strong>{{ action.name }}</strong></div>
+          <p>{{ action.description }}</p>
+          <small *ngIf="action.inputPaths.length">Scope: {{ action.inputPaths.join(', ') }}</small>
+          <pre>{{ action.code }}</pre>
+          <div><button (click)="rejectAction(action)">Reject</button><button class="approve" (click)="approveAction(action)">Review approved</button></div>
+        </article>
+      </div>
+      <div class="change-review" *ngIf="proposal">
+        <div class="change-tabs">
+          <button *ngFor="let change of proposal.changes; let index = index" (click)="activeDiff=index" [class.active]="activeDiff===index">
+            <input type="checkbox" [checked]="accepted.has(change.path)" (click)="$event.stopPropagation()" (change)="toggleChange(change.path)">
+            <span class="op" [class]="change.operation">{{ change.operation[0].toUpperCase() }}</span>
+            <span>{{ change.path }}</span>
+          </button>
+        </div>
+        <pre class="diff">{{ proposal.changes[activeDiff].diff }}</pre>
+        <div class="review-actions">
+          <button class="discard" (click)="proposal=undefined; accepted.clear()">Discard</button>
+          <button class="apply" (click)="applyChanges()" [disabled]="!accepted.size || busy">Keep {{ accepted.size }} & apply</button>
+        </div>
+      </div>
+      <div class="review-footer"><span class="shield">◇</span><div><strong>You stay in control</strong><small>Nothing is written without approval.</small></div></div>
+    </aside>
+  </section>
+</main>
