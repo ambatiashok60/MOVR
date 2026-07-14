@@ -83,15 +83,15 @@ class Bedrock:
                             "Finish the requested analysis with concrete evidence and a complete conclusion."
                         )}]})
                         continue
-                        errors = runner.validate_proposals()
-                        if errors and continuations < self.config.agent_max_response_continuations:
-                            continuations += 1
-                            runner.events.append({"tool": "critic_repair", "status": "retry", "errors": errors})
-                            messages.append({"role": "user", "content": [{"text": "Critic found proposal issues: " + "; ".join(errors) + ". Repair the proposal and re-check it before answering."}]})
-                            continue
-                        if runner.changes():
-                            runner.events.append({"tool": "critic_repair", "status": "passed"})
-                        return AgentResult(final_text, runner.changes(), runner.events, runner.action_proposals, runner.plan, runner.relationships)
+                    errors = runner.validate_proposals()
+                    if errors and continuations < self.config.agent_max_response_continuations:
+                        continuations += 1
+                        runner.events.append({"tool": "critic_repair", "status": "retry", "errors": errors})
+                        messages.append({"role": "user", "content": [{"text": "Critic found proposal issues: " + "; ".join(errors) + ". Repair the proposal and re-check it before answering."}]})
+                        continue
+                    if runner.changes():
+                        runner.events.append({"tool": "critic_repair", "status": "passed"})
+                    return AgentResult(final_text, runner.changes(), runner.events, runner.action_proposals, runner.plan, runner.relationships)
                 results = []
                 for use in uses:
                     if cancel_event and cancel_event.is_set():
