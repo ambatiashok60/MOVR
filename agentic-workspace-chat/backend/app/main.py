@@ -110,10 +110,16 @@ def list_files(request: WorkspaceRequest):
 async def chat(request: ChatRequest, http_request: Request):
     root = resolve_workspace(request.path, config)
     context = [(name, read_text(root, name, config.workspace_max_file_bytes)) for name in request.files]
+    history: list[dict] = []
+    prior_plan: list[dict] = []
     if request.session_id:
+        history = sessions.messages(request.session_id)
+        prior_plan = next((m.get("plan") or [] for m in reversed(history) if m.get("role") == "assistant" and m.get("plan")), [])
         sessions.append(request.session_id, {"role": "user", "content": request.message, "contextFiles": request.files})
     cancel_event = Event()
-    task = asyncio.create_task(asyncio.to_thread(Bedrock(config).run, root, request.message, context, request.detail, cancel_event))
+    task = asyncio.create_task(asyncio.to_thread(
+        Bedrock(config).run, root, request.message, context, request.detail, cancel_event, history, prior_plan
+    ))
     while not task.done():
         if await http_request.is_disconnected():
             cancel_event.set()

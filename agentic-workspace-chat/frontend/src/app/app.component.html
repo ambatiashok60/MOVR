@@ -38,7 +38,7 @@
 
     <section class="chat">
       <div class="messages" #messageScroll>
-        <div class="agent-plan" *ngIf="plan.length"><div class="eyebrow">AGENT PLAN</div><div class="plan-step" *ngFor="let item of plan"><span [class]="item.status">{{ item.status === 'completed' ? '✓' : item.status === 'in_progress' ? '●' : '○' }}</span>{{ item.step }}</div></div>
+        <div class="agent-plan" *ngIf="plan.length"><div class="eyebrow">AGENT PLAN <em>{{ planProgress() }}</em></div><div class="plan-step" *ngFor="let item of plan"><span [class]="item.status">{{ item.status === 'completed' ? '✓' : item.status === 'in_progress' ? '●' : '○' }}</span>{{ item.step }}</div></div>
         <div class="agent-plan relationship-map" *ngIf="relationships.length"><div class="eyebrow">EVIDENCE MAP</div><div class="relationship" *ngFor="let item of relationships"><code>{{item.path}}:{{item.line}}</code><span>{{item.text}}</span></div></div>
         <div class="welcome" *ngIf="messages.length === 1">
           <div class="orb"><span></span></div>
@@ -67,7 +67,7 @@
         <textarea [(ngModel)]="prompt" (keydown)="handleComposerKeydown($event)" rows="3"
           [disabled]="!workspace" placeholder="Ask Arc to inspect, explain, or change your workspace…"></textarea>
         <div class="compose-actions">
-          <div class="tools"><button title="Attach files">＋</button><select [(ngModel)]="agentMode" title="Agent mode"><option value="debug">Debug</option><option value="analyze">Analyze</option><option value="migrate">Migrate</option><option value="refactor">Refactor</option><option value="tests">Tests</option></select><select [(ngModel)]="responseDetail" title="Response detail"><option value="auto">Auto detail</option><option value="brief">Brief</option><option value="detailed">Detailed</option></select><span>Enter to send · Shift+Enter for newline</span></div>
+          <div class="tools"><button title="Attach files">＋</button><select [(ngModel)]="agentMode" title="Agent mode"><option value="debug">Debug</option><option value="analyze">Analyze</option><option value="migrate">Migrate</option><option value="refactor">Refactor</option><option value="tests">Tests</option></select><select [(ngModel)]="responseDetail" title="Response detail"><option value="auto">Auto detail</option><option value="brief">Brief</option><option value="detailed">Detailed</option></select><span class="hints"><kbd>↵</kbd> send · <kbd>⇧↵</kbd> newline</span></div>
           <button class="send" (click)="send()" [disabled]="!workspace || !prompt.trim() || busy">↑</button>
         </div>
       </div>
@@ -99,7 +99,7 @@
           </button>
         </div>
         <div class="hunk-list" *ngIf="proposal.changes[activeDiff].hunks?.length"><label *ngFor="let hunk of proposal.changes[activeDiff].hunks"><input type="checkbox" [checked]="acceptedHunks[proposal.changes[activeDiff].path]?.has(hunk.id)" (change)="toggleHunk(proposal.changes[activeDiff].path, hunk.id)"><code>{{hunk.header}}</code></label></div>
-        <pre class="diff">{{ proposal.changes[activeDiff].diff }}</pre>
+        <pre class="diff"><span *ngFor="let line of diffLines(proposal.changes[activeDiff].diff)" [class]="'diff-line ' + line.kind">{{ line.text }}</span></pre>
         <div class="review-actions">
           <button class="discard" (click)="proposal=undefined; accepted.clear()">Discard</button>
           <button class="apply" (click)="applyChanges()" [disabled]="!accepted.size || busy">Keep {{ accepted.size }} & apply</button>

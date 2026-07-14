@@ -54,7 +54,7 @@ TOOL_CONFIG = {"tools": [
         }, "required": ["step", "status"]}},
     }, ["steps"]),
     spec("validate_overlay", "Validate proposed edits before presenting a diff.", {}, []),
-    spec("propose_command", "Propose an approved, non-shell validation command. Execution requires user approval.", {
+    spec("run_command", "Run an allowlisted validation command (pytest, ruff, mypy, tsc, npm, pnpm, npx, python) inside the workspace and read its output. Commands run against the current on-disk state; proposed edits are not applied until the user accepts them.", {
         "command": {"type": "array", "items": {"type": "string"}},
         "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 300}
     }, ["command"]),
@@ -80,6 +80,7 @@ class ToolRunner:
     action_proposals: list[ToolProposal] = field(default_factory=list)
     plan: list[dict] = field(default_factory=list)
     relationships: list[dict] = field(default_factory=list)
+    command_runs: int = 0
 
     def tool_config(self) -> dict:
         tools = list(TOOL_CONFIG["tools"])
@@ -215,11 +216,22 @@ class ToolRunner:
             self.events.append({"tool": "critic", "status": "success", "feedback": "Overlay passed structural validation."})
         return result
 
-    def tool_propose_command(self, command: list[str], timeout_seconds: int = 60) -> dict:
+    def tool_run_command(self, command: list[str], timeout_seconds: int = 60) -> dict:
+        if self.command_runs >= self.config.agent_max_command_runs:
+            raise ValueError(
+                f"Command budget exhausted ({self.config.agent_max_command_runs} per run); "
+                "summarize findings instead of running more commands"
+            )
         validate_command(command)
-        proposal = {"command": command, "timeout_seconds": min(timeout_seconds, 300), "root": str(self.root)}
-        self.events.append({"tool": "command", "status": "awaiting_user_approval", "command": command})
-        return {"commandProposal": proposal, "status": "awaiting_user_approval"}
+        self.command_runs += 1
+        result = run_safe_command(self.root, command, timeout_seconds)
+        self.events.append({
+            "tool": "command",
+            "status": "success" if result["returnCode"] == 0 else "error",
+            "command": command,
+            "returnCode": result["returnCode"],
+        })
+        return result
 
     def tool_propose_ephemeral_tool(self, name: str, description: str, code: str,
                                     input_paths: list[str], args: dict | None = None) -> dict:

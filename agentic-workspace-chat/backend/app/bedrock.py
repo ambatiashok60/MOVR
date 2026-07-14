@@ -5,6 +5,7 @@ from threading import Event
 from botocore.exceptions import BotoCoreError, ClientError, ProfileNotFound
 from fastapi import HTTPException
 
+from .agent_context import to_converse_history, unfinished_plan
 from .config import Settings
 from .models import FileChange
 from .tools import ToolRunner
@@ -18,6 +19,8 @@ class AgentResult:
     actions: list
     plan: list[dict]
     relationships: list[dict]
+
+
 
 
 class Bedrock:
@@ -41,24 +44,49 @@ class Bedrock:
         except ProfileNotFound as error:
             raise HTTPException(503, f"AWS profile '{self.config.aws_profile}' was not found") from error
 
-    def run(self, root: Path, message: str, context: list[tuple[str, str]], detail: str = "auto", cancel_event: Event | None = None) -> AgentResult:
+    def run(self, root: Path, message: str, context: list[tuple[str, str]], detail: str = "auto", cancel_event: Event | None = None,
+            history: list[dict] | None = None, prior_plan: list[dict] | None = None) -> AgentResult:
         file_context = "\n\n".join(f"<file path=\"{name}\">\n{text}\n</file>" for name, text in context)
-        prompt = f"{file_context}\n\n<request>\n{message}\n</request>" if context else message
-        messages = [{"role": "user", "content": [{"text": prompt}]}]
+        sections = []
+        if file_context:
+            sections.append(file_context)
+        resumable = unfinished_plan(prior_plan)
+        if resumable:
+            plan_lines = "\n".join(f"- [{step.get('status')}] {step.get('step')}" for step in resumable)
+            sections.append(
+                "<active_plan>\nA plan from earlier in this session is still in progress. Resume it "
+                f"unless the new request changes direction; update statuses as you work.\n{plan_lines}\n</active_plan>"
+            )
+        sections.append(f"<request>\n{message}\n</request>" if sections else message)
+        prompt = "\n\n".join(sections)
+        messages = to_converse_history(
+            history or [], self.config.agent_history_messages, self.config.agent_history_max_chars
+        )
+        messages.append({"role": "user", "content": [{"text": prompt}]})
         runner = ToolRunner(root, self.config)
+        runner.plan = list(resumable)
         final_text = ""
         continuations = 0
+        step = 0
         try:
             client = self._client()
-            for _ in range(self.config.agent_max_steps):
+            while step < (self.config.agent_max_steps_planned if runner.plan else self.config.agent_max_steps):
+                step += 1
                 if cancel_event and cancel_event.is_set():
                     return AgentResult(final_text + "\n\nGeneration stopped.", runner.changes(), runner.events, runner.action_proposals, runner.plan, runner.relationships)
                 response = client.converse(
                     modelId=self.config.bedrock_model_id,
                     system=[{"text": (
                         "You are a migration-grade coding agent operating only inside the connected workspace. "
+                        "First assess the request: for multi-step work (three or more distinct steps, migrations, new modules, "
+                        "or anything spanning several files), publish a plan with update_plan BEFORE editing and keep each "
+                        "step's status current as you work — publishing a plan extends your step budget. For simple questions "
+                        "or single-file edits, skip the plan and act directly. "
                         "Explore with tools, read relevant ranges, and use precise edit tools when changes are requested. "
                         "For repository analysis or debugging, use find_relationships and cite its path, line, and matched text as evidence. "
+                        "Use run_command to execute allowlisted validation commands (pytest, ruff, mypy, tsc) and iterate on their "
+                        "output; remember commands see the on-disk state, not your unapplied proposals, so run them to diagnose "
+                        "before editing or to verify previously applied changes. "
                         "When a tool returns an error or a target cannot be resolved, treat it as feedback: inspect again and retry within the step budget; do not silently downgrade. "
                         "Before presenting any edit, review it as a critic for completeness, consistency, and obvious structural errors, then repair it if needed. "
                         "Edits are proposals for user review. Never claim validation you did not run. "

@@ -34,7 +34,15 @@ class Settings(BaseSettings):
     workspace_max_files: int = 10_000
     workspace_max_file_bytes: int = 1_048_576
     agent_max_steps: int = 12
+    # Extended budget that activates implicitly when the model publishes a plan
+    # via update_plan — complex, multi-step work gets more room automatically.
+    agent_max_steps_planned: int = 32
     agent_max_response_continuations: int = 3
+    # Conversation memory sent to the model per turn (bounded).
+    agent_history_messages: int = 12
+    agent_history_max_chars: int = 24_000
+    # Allowlisted validation commands the agent may execute per run.
+    agent_max_command_runs: int = 5
     agent_state_dir: Path = Path(".agent-state")
     custom_tool_timeout_seconds: int = 5
     frontend_origin: str = "http://localhost:4200"

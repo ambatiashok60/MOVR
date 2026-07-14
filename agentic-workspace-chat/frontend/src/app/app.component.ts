@@ -138,6 +138,22 @@ export class AppComponent implements OnInit {
     return DOMPurify.sanitize(marked.parse(text, { async: false }) as string);
   }
 
+  diffLines(diff: string): { text: string; kind: 'add' | 'del' | 'hunk' | 'meta' | 'ctx' }[] {
+    return diff.split('\n').map(line => ({
+      text: line,
+      kind: line.startsWith('@@') ? 'hunk'
+        : line.startsWith('+++') || line.startsWith('---') ? 'meta'
+        : line.startsWith('+') ? 'add'
+        : line.startsWith('-') ? 'del'
+        : 'ctx',
+    }));
+  }
+
+  planProgress(): string {
+    const done = this.plan.filter(step => step.status === 'completed').length;
+    return `${done}/${this.plan.length}`;
+  }
+
   private buildTree(paths: string[]): TreeNode[] {
     const result: TreeNode[] = [];
     const folders = new Set<string>();
