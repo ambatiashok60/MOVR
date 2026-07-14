@@ -60,7 +60,18 @@ AGENT_MAX_RESPONSE_CONTINUATIONS=3
 AGENT_STATE_DIR=.agent-state
 CUSTOM_TOOL_TIMEOUT_SECONDS=5
 FRONTEND_ORIGIN=http://localhost:4200
+API_AUTH_TOKEN=
+MAX_REQUEST_BYTES=2000000
+REQUEST_TIMEOUT_SECONDS=300
 ```
+
+For a trusted loopback-only setup, leave `API_AUTH_TOKEN` empty. If the API is
+reachable by another machine, set a long random token; send it as
+`Authorization: Bearer <token>` (or `X-API-Key`). `/api/health` and
+`/api/config` remain available for diagnostics and report only whether auth is
+configured, never the token. Requests larger than `MAX_REQUEST_BYTES` are
+rejected before JSON parsing. Every response includes an `X-Request-ID` for
+support and audit correlation.
 
 For SSO mode, set `AWS_PROFILE` and authenticate with the AWS CLI. For static
 key mode, set `AWS_AUTH_MODE=keys`, then provide `AWS_ACCESS_KEY_ID` and

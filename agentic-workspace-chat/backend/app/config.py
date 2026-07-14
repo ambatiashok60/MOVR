@@ -1,3 +1,4 @@
+import json
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
@@ -37,11 +38,39 @@ class Settings(BaseSettings):
     agent_state_dir: Path = Path(".agent-state")
     custom_tool_timeout_seconds: int = 5
     frontend_origin: str = "http://localhost:4200"
+    # Optional bearer token for deployments where the local UI is not enough
+    # isolation. Empty keeps localhost development backwards compatible.
+    api_auth_token: str = ""
+    max_request_bytes: int = 2_000_000
+    request_timeout_seconds: int = 300
 
     @field_validator("workspace_allowed_roots", mode="before")
     @classmethod
     def split_roots(cls, value: object) -> object:
-        return [part.strip() for part in value.split(",") if part.strip()] if isinstance(value, str) else value
+        """Accept both env formats: a JSON array or a comma-separated string.
+
+        A JSON-style value fed through the comma splitter would keep the
+        literal brackets/quotes inside the path and every workspace check
+        would fail with 403, so JSON is parsed first. Individual entries are
+        stripped of whitespace and surrounding quotes.
+        """
+        if not isinstance(value, str):
+            return value
+        text = value.strip()
+        parts: list[str]
+        if text.startswith("["):
+            try:
+                loaded = json.loads(text)
+            except json.JSONDecodeError:
+                loaded = None
+            if isinstance(loaded, list):
+                parts = [str(item) for item in loaded]
+            else:
+                parts = text.split(",")
+        else:
+            parts = text.split(",")
+        cleaned = [part.strip().strip("\"'").strip() for part in parts]
+        return [part for part in cleaned if part]
 
 
 @lru_cache

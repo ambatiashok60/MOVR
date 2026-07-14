@@ -1,8 +1,10 @@
+import logging
 from uuid import uuid4
 import asyncio
 from threading import Event
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from .bedrock import Bedrock
@@ -13,7 +15,15 @@ from .models import ActionRequest, ApplyRequest, ChatRequest, CommandRequest, Pr
 from .tools import ToolRunner, run_safe_command
 from .workspace import apply_change, apply_hunks, diff_for, diff_hunks, files, read_text, resolve_file, resolve_workspace, sha
 
+logger = logging.getLogger("agentic-workspace-chat")
+
 config = settings()
+# repr() on purpose: it exposes stray quotes/brackets/whitespace that would
+# make every workspace validation fail with 403 while the .env "looks right".
+logger.info(
+    "workspace_allowed_roots (effective runtime value): %r",
+    [str(root) for root in config.workspace_allowed_roots],
+)
 app = FastAPI(title="Agentic Workspace Chat", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
@@ -21,6 +31,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def request_guard(request: Request, call_next):
+    """Apply optional API auth and a cheap pre-parse request-size guard."""
+    request_id = request.headers.get("x-request-id") or str(uuid4())
+    if config.api_auth_token and request.method != "OPTIONS" and request.url.path.startswith("/api/") and request.url.path not in {"/api/health", "/api/config"}:
+        supplied = request.headers.get("authorization", "")
+        token = supplied[7:] if supplied.lower().startswith("bearer ") else request.headers.get("x-api-key", "")
+        if token != config.api_auth_token:
+            return JSONResponse(status_code=401, content={"detail": "Authentication required", "requestId": request_id}, headers={"x-request-id": request_id})
+    length = request.headers.get("content-length")
+    if length and length.isdigit() and int(length) > config.max_request_bytes:
+        return JSONResponse(status_code=413, content={"detail": "Request body exceeds configured limit", "requestId": request_id}, headers={"x-request-id": request_id})
+    request.state.request_id = request_id
+    response = await call_next(request)
+    response.headers["x-request-id"] = request_id
+    return response
 proposals: dict[str, tuple[str, ProposalRequest]] = {}
 actions: dict[str, tuple[str, ToolProposal]] = {}
 sessions = SessionStore(config.agent_state_dir)
@@ -43,7 +71,8 @@ def session_messages(session_id: str):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "region": config.aws_region, "model": config.bedrock_model_id}
+    return {"status": "ok", "region": config.aws_region, "model": config.bedrock_model_id,
+            "authConfigured": bool(config.api_auth_token), "workspaceRoots": len(config.workspace_allowed_roots)}
 
 
 @app.get("/api/config")
@@ -52,6 +81,8 @@ def runtime_config():
         "provider": "AWS Bedrock",
         "model": {"id": config.bedrock_model_id, "displayName": model_display_name(config.bedrock_model_id)},
         "region": config.aws_region,
+        "authRequired": bool(config.api_auth_token),
+        "limits": {"maxRequestBytes": config.max_request_bytes, "maxMessageChars": 50_000},
         "features": {"streaming": False, "toolCalling": True, "reviewedEdits": True, "customTools": True},
     }
 

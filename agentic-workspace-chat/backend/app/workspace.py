@@ -29,8 +29,10 @@ def is_binary(path: Path) -> bool:
 
 def resolve_workspace(raw: str, config: Settings) -> Path:
     path = Path(raw).expanduser().resolve()
+    if not path.exists():
+        raise HTTPException(400, "Workspace path does not exist")
     if not path.is_dir():
-        raise HTTPException(400, "Workspace does not exist or is not a directory")
+        raise HTTPException(400, "Workspace path is not a directory")
     if not any(path.is_relative_to(root.expanduser().resolve()) for root in config.workspace_allowed_roots):
         raise HTTPException(403, "Workspace is outside WORKSPACE_ALLOWED_ROOTS")
     return path
