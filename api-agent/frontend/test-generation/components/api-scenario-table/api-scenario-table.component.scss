@@ -1,0 +1,29 @@
+:host {
+  --api-table-border: #dce4f0;
+  --api-table-text: #172033;
+  --api-table-muted: #64748b;
+  --api-table-primary: #0866ff;
+  display: block;
+}
+.table-scroll { overflow: auto; border: 1px solid var(--api-table-border); border-radius: 8px; background: #fff; }
+table { width: 100%; min-width: 1180px; border-collapse: collapse; color: var(--api-table-text); font-size: 12px; }
+th, td { padding: 11px 9px; border-bottom: 1px solid #edf1f6; text-align: left; vertical-align: middle; }
+th { color: #344054; background: #fbfcfe; font-size: 11px; font-weight: 700; white-space: nowrap; }
+tr.active { background: #f2f7ff; outline: 1px solid #73a9ff; outline-offset: -1px; }
+.checkbox-cell { width: 28px; text-align: center; }
+.id-cell { white-space: nowrap; }
+.scenario-cell { min-width: 210px; line-height: 1.45; }
+.actions-cell { white-space: nowrap; }
+.badge, .dependency { display: inline-flex; margin: 1px; padding: 3px 7px; border-radius: 5px; background: #f1f5f9; white-space: nowrap; }
+.badge--method { color: #067647; background: #eafaf1; }
+.badge--status { color: #075cd8; background: #eaf2ff; }
+.badge--priority { color: #c4320a; background: #fff0ec; }
+.badge[data-type='positive'] { color: #067647; background: #eafaf1; }
+.badge[data-type='negative'] { color: #d92d20; background: #fff0f0; }
+.badge[data-type='contract'] { color: #175cd3; background: #eaf2ff; }
+.badge[data-type='security'] { color: #6938ef; background: #f1edff; }
+select { min-height: 29px; border: 1px solid var(--api-table-border); border-radius: 5px; background: #fff; }
+button { margin-right: 4px; border: 0; padding: 4px; color: var(--api-table-primary); background: transparent; font: inherit; cursor: pointer; }
+button:disabled { color: #98a2b3; cursor: not-allowed; }
+button.danger { color: #d92d20; }
+.empty-cell { padding: 28px; color: var(--api-table-muted); text-align: center; }

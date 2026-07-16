@@ -1,0 +1,13 @@
+<!-- REFERENCE ONLY: keep the host's existing Functional Tests markup unchanged. -->
+<!-- HOST APP: add an "API Tests" tab trigger beside the existing Functional Tests trigger. -->
+
+<!-- HOST APP: render this block only when the API Tests tab is active. -->
+<app-api-test-gen
+  [selectedStory]="selectedStory"
+  [tenantId]="tenantId"
+  [repoPath]="repositoryPath"
+  [branch]="selectedBranch"
+/>
+
+<!-- The component emits no host-specific navigation or notification events.
+     Edit/delete hooks are intentionally no-ops until connected to host dialogs. -->

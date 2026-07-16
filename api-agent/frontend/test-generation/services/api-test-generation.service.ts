@@ -1,5 +1,5 @@
 import { HttpClient } from '@angular/common/http';
-import { Injectable, NgZone } from '@angular/core';
+import { Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
 
 import {
@@ -8,7 +8,6 @@ import {
 } from '../models/api-scenario.model';
 import {
   GenerateApiTestCodeRequest,
-  GenerationEvent,
   GenerationJob,
   QueuedTask,
 } from '../models/api-test-generation.model';
@@ -22,10 +21,7 @@ export interface RepoProfileRequest {
 
 @Injectable({ providedIn: 'root' })
 export class ApiTestGenerationService {
-  constructor(
-    private readonly http: HttpClient,
-    private readonly zone: NgZone,
-  ) {}
+  constructor(private readonly http: HttpClient) {}
 
   generateApiScenarios(payload: GenerateApiScenariosRequest): Observable<QueuedTask> {
     return this.http.post<QueuedTask>(
@@ -61,36 +57,6 @@ export class ApiTestGenerationService {
       `${API_TEST_GENERATION_PREFIX}/generateRepoProfile`,
       payload,
     );
-  }
-
-  streamEvents(taskId: string): Observable<GenerationEvent> {
-    return new Observable<GenerationEvent>((subscriber) => {
-      const source = new EventSource(`${API_TEST_GENERATION_PREFIX}/events/${taskId}`, {
-        withCredentials: true,
-      });
-
-      const handle = (event: MessageEvent) => {
-        this.zone.run(() => {
-          try {
-            subscriber.next(JSON.parse(event.data) as GenerationEvent);
-          } catch (error) {
-            subscriber.error(error);
-          }
-        });
-      };
-
-      const eventNames = ['queued', 'running', 'progress', 'aborting', 'aborted', 'completed', 'failed'];
-      eventNames.forEach((name) => source.addEventListener(name, handle as EventListener));
-
-      source.onerror = (error) => {
-        this.zone.run(() => subscriber.error(error));
-      };
-
-      return () => {
-        eventNames.forEach((name) => source.removeEventListener(name, handle as EventListener));
-        source.close();
-      };
-    });
   }
 
   extractScenarioResult(job: GenerationJob): ApiScenarioGenerationResult | null {

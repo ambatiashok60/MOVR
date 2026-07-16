@@ -17,5 +17,5 @@ export class FileChangeCardComponent {
   @Input({ required: true }) file!: FileChange;
   @Input() selected = false;
   @Output() select = new EventEmitter<void>();
-  @Output() decisionChange = new EventEmitter<ReviewDecision>();
+  @Output() decisionChange = new EventEmitter<Extract<ReviewDecision, 'kept' | 'rejected'>>();
 }

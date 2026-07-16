@@ -1,0 +1,50 @@
+<div class="api-scenario-table" [attr.aria-busy]="loading">
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th class="checkbox-cell"><input type="checkbox" aria-label="Select all scenarios" [checked]="scenarios.length > 0 && selectedIds.length === scenarios.length" (change)="toggleAll()" /></th>
+          <th>Scenario ID</th>
+          <th>Scenario</th>
+          <th>API / Operation</th>
+          <th>Method</th>
+          <th>Type</th>
+          <th>Target</th>
+          <th>Dependencies</th>
+          <th>Priority</th>
+          <th>Status</th>
+          <th class="actions-cell">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr *ngFor="let row of scenarios; trackBy: trackById" [class.active]="row.id === selectedScenarioId">
+          <td class="checkbox-cell"><input type="checkbox" [attr.aria-label]="'Select ' + row.id" [checked]="isSelected(row.id)" (change)="toggle(row.id)" /></td>
+          <td class="id-cell">{{ row.id }}</td>
+          <td class="scenario-cell">{{ row.name }}</td>
+          <td>{{ row.operation }}</td>
+          <td><span class="badge badge--method">{{ row.method }}</span></td>
+          <td><span class="badge" [attr.data-type]="row.type.toLowerCase()">{{ row.type }}</span></td>
+          <td>
+            <select [(ngModel)]="row.target" [attr.aria-label]="'Execution target for ' + row.id">
+              <option value="ci">CI</option><option value="stage">Stage</option><option value="both">Both</option>
+            </select>
+          </td>
+          <td>
+            <span *ngIf="!row.dependencies.length">-</span>
+            <span class="dependency" *ngFor="let dependency of row.dependencies">{{ dependency.label }}</span>
+          </td>
+          <td><span class="badge badge--priority">{{ row.priority }}</span></td>
+          <td><span class="badge badge--status">{{ row.status }}</span></td>
+          <td class="actions-cell">
+            <button type="button" title="Generate code" [disabled]="generatingCodeForId !== null" (click)="generateCode.emit(row)">{{ generatingCodeForId === row.id ? 'Generating…' : 'Generate' }}</button>
+            <button type="button" title="Edit scenario" (click)="editScenario.emit(row)">Edit</button>
+            <button type="button" title="View scenario" (click)="openScenario.emit(row)">View</button>
+            <button type="button" class="danger" title="Delete scenario" (click)="deleteScenario.emit(row)">Delete</button>
+          </td>
+        </tr>
+        <tr *ngIf="loading"><td colspan="11" class="empty-cell">Generating API scenarios…</td></tr>
+        <tr *ngIf="!loading && !scenarios.length"><td colspan="11" class="empty-cell">Generate API scenarios from the selected user story.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>

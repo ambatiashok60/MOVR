@@ -21,3 +21,6 @@ dist/
 # Package manager store and build caches
 .pnpm-store/
 .angular/
+node_modules/
+.pnpm-store/
+.DS_Store
