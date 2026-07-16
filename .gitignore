@@ -1,3 +1,26 @@
+# Generated preview bundles (Angular build output snapshots)
+combined-preview-*/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+
+# Environment
+.env
+.venv/
+
+# OS
+.DS_Store
+
+# Package manager store and build caches
+.pnpm-store/
+.angular/
 node_modules/
 .pnpm-store/
 .DS_Store

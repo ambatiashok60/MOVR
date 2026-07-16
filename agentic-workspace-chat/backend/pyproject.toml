@@ -1,0 +1,18 @@
+[project]
+name = "agentic-workspace-chat"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "boto3>=1.40,<2",
+  "fastapi>=0.115,<1",
+  "pydantic-settings>=2.6,<3",
+  "uvicorn[standard]>=0.32,<1",
+]
+
+[project.optional-dependencies]
+dev = ["httpx>=0.28,<1", "pytest>=8.3,<9"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
