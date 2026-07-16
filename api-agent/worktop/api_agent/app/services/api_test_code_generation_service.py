@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from worktop.api_agent.app.agents.critic_agent import CriticAgent
 from worktop.api_agent.app.agents.test_generation_agent import TestGenerationAgent
 from worktop.api_agent.app.config import settings
+from worktop.api_agent.app.governance.generation_budget import BudgetExceededError
 from worktop.api_agent.app.utils.logging_utils import log_step
 from worktop.api_agent.app.schemas.api_test_generation_request import GenerateApiTestCodeRequest
 from worktop.api_agent.app.schemas.api_test_generation_result import ApiTestGenerationResult
@@ -15,6 +17,7 @@ from worktop.api_agent.app.services.generation_manifest_service import (
     GenerationManifestService,
 )
 from worktop.api_agent.app.services.review_report_service import ReviewReportService
+from worktop.api_agent.app.services.test_placement_service import TestPlacementService
 from worktop.api_agent.app.services.traceability_service import TraceabilityService
 from worktop.api_agent.app.strategies.strategy_registry import StrategyRegistry
 from worktop.api_agent.app.validation.api_test_validator import ApiTestValidator
@@ -30,12 +33,16 @@ class ApiTestCodeGenerationService:
         validator: ApiTestValidator | None = None,
         file_guard: GeneratedFileGuard | None = None,
         strategy_registry: StrategyRegistry | None = None,
+        placement_service: TestPlacementService | None = None,
+        critic: CriticAgent | None = None,
     ) -> None:
         self.agent = agent
+        self.critic = critic
         self.file_writer = file_writer or ApiTestFileWriter()
         self.validator = validator or ApiTestValidator()
         self.file_guard = file_guard or GeneratedFileGuard()
         self.strategy_registry = strategy_registry or StrategyRegistry()
+        self.placement_service = placement_service
         self.coverage = ApiCoverageService()
         self.traceability = TraceabilityService()
         self.review_reports = ReviewReportService()
@@ -72,6 +79,15 @@ class ApiTestCodeGenerationService:
                 "Generated files are deterministic scaffold skeletons, not real "
                 "coverage; they must be reviewed and completed before merging."
             )
+        elif settings.enable_test_placement and output.files and profile.existing_tests:
+            # test_agent-parity placement: merge generated tests into existing
+            # test files when the placement agent proves the merge preserves
+            # what is already there; unprovable merges stay new files.
+            output, placement_warnings, placement_reasons = self._place_generated_tests(
+                request, output, profile, source_context, repo_understanding
+            )
+            guard_warnings = [*guard_warnings, *placement_warnings]
+            review_reasons.extend(placement_reasons)
 
         repository_policy = self.policy.load(request.repo_path)
         review_reasons.extend(
@@ -196,6 +212,96 @@ class ApiTestCodeGenerationService:
             manifest=manifest,
         )
 
+    def _place_generated_tests(
+        self,
+        request: GenerateApiTestCodeRequest,
+        output,
+        profile: RepoProfile,
+        source_context,
+        repo_understanding,
+    ):
+        from worktop.api_agent.app.agents.test_placement_agent import TestPlacementAgent
+
+        placement = self.placement_service or TestPlacementService(
+            TestPlacementAgent(getattr(self.agent, "llm", None))
+        )
+        return placement.apply(
+            request.repo_path,
+            output,
+            profile,
+            source_context=source_context,
+            repo_understanding=repo_understanding,
+        )
+
+    def _critic_review(
+        self,
+        output,
+        request: GenerateApiTestCodeRequest,
+        profile: RepoProfile,
+        source_context,
+        mock_stub_plan,
+        repo_understanding,
+        stage: str,
+        validation_failure: str | None = None,
+    ):
+        """Best-effort critic pass (test_agent parity): the critic may revise
+        the generated files but can never lose them — a failed, empty, or
+        file-set-changing review keeps the original output. The deterministic
+        write guard still runs after this on whatever survives."""
+        if not settings.enable_critic_review or not output.files:
+            return output, []
+        critic = self.critic
+        if critic is None:
+            llm = getattr(self.agent, "llm", None)
+            if llm is None:
+                return output, []
+            critic = CriticAgent(llm)
+        try:
+            reviewed = critic.review(
+                output,
+                request,
+                profile,
+                source_context=source_context,
+                mock_stub_plan=mock_stub_plan,
+                repo_understanding=repo_understanding,
+                validation_failure=validation_failure,
+            )
+        except BudgetExceededError:
+            raise
+        except Exception:
+            log_step(f"{stage}_failed", {"kept_files": len(output.files)})
+            return output, [
+                "Critic review failed; the generated files were kept unreviewed."
+            ]
+        original_paths = {file.relative_path for file in output.files}
+        reviewed_paths = {file.relative_path for file in reviewed.files}
+        if reviewed_paths != original_paths:
+            log_step(
+                f"{stage}_rejected",
+                {
+                    "reason": "file_set_changed",
+                    "original": sorted(original_paths),
+                    "reviewed": sorted(reviewed_paths),
+                },
+            )
+            return output, [
+                "Critic review changed the generated file set; the original "
+                "files were kept."
+            ]
+        before_by_path = {file.relative_path: file.content for file in output.files}
+        revised = sum(
+            1
+            for file in reviewed.files
+            if file.content != before_by_path[file.relative_path]
+        )
+        log_step(stage, {"files": len(reviewed.files), "revised": revised})
+        warnings = list(reviewed.warnings)
+        if revised:
+            warnings.append(
+                f"Critic review revised {revised} generated file(s) before writing."
+            )
+        return output.model_copy(update={"files": reviewed.files}), warnings
+
     def _generate_with_healing(
         self,
         request: GenerateApiTestCodeRequest,
@@ -224,6 +330,16 @@ class ApiTestCodeGenerationService:
                 mock_stub_plan=mock_stub_plan,
                 repo_understanding=repo_understanding,
             )
+            output, critic_warnings = self._critic_review(
+                output,
+                request,
+                profile,
+                source_context=source_context,
+                mock_stub_plan=mock_stub_plan,
+                repo_understanding=repo_understanding,
+                stage="critic_review",
+            )
+            warnings.extend(critic_warnings)
             output, guard_warnings, guard_reasons = self.file_guard.review(
                 request.repo_path, output, profile, request,
                 mock_stub_plan=mock_stub_plan,
@@ -292,6 +408,17 @@ class ApiTestCodeGenerationService:
                 mock_stub_plan=mock_stub_plan,
                 repo_understanding=repo_understanding,
             )
+            repaired, repair_critic_warnings = self._critic_review(
+                repaired,
+                request,
+                profile,
+                source_context=source_context,
+                mock_stub_plan=mock_stub_plan,
+                repo_understanding=repo_understanding,
+                stage="repair_critic_review",
+                validation_failure=failure_output,
+            )
+            warnings.extend(repair_critic_warnings)
             repaired, repair_guard_warnings, _ = self.file_guard.review(
                 request.repo_path, repaired, profile, request,
                 mock_stub_plan=mock_stub_plan,

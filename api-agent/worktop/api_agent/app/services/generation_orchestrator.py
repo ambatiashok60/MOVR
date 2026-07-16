@@ -186,6 +186,13 @@ class GenerationOrchestrator:
             publish("selecting_generation_strategy", "Selecting repository-native generation strategy", {"capability_readiness": profile.capability_assessment.readiness.model_dump() if profile.capability_assessment else None, "generation_plan": profile.generation_plan.model_dump() if profile.generation_plan else None, "reasoning_review": reasoning.model_dump() if reasoning else None, "telemetry": profile.capability_assessment.telemetry.model_dump() if profile.capability_assessment and profile.capability_assessment.telemetry else None})
 
             self._check_abort(task_id, is_abort_requested)
+            if settings.enable_test_placement and profile.existing_tests:
+                publish(
+                    "planning_test_placement",
+                    "Generated tests may extend existing test files when coverage "
+                    "is provably preserved",
+                    {"existing_test_count": len(profile.existing_tests)},
+                )
             publish("generating_test_code", "Generating repository-native API tests", None)
             service = ApiTestCodeGenerationService(TestGenerationAgent(llm_client))
             workspace = self.workspaces.acquire(task_id, request.repo_path)

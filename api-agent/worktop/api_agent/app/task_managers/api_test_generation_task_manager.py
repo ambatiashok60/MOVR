@@ -49,6 +49,7 @@ class ApiTestGenerationTaskManager:
         request: GenerateApiTestCodeRequest,
         db: Any | None = None,
     ) -> str:
+        _require_resolved_repo_path(request)
         key = make_api_test_key(
             request.tenant_id or 1,
             request.user_story_hierarchy_id,
@@ -68,6 +69,7 @@ class ApiTestGenerationTaskManager:
         db: Any | None = None,
         task_id: str | None = None,
     ) -> str:
+        _require_resolved_repo_path(request)
         key = make_api_test_key(
             request.tenant_id or 1,
             request.user_story_hierarchy_id,
@@ -269,6 +271,17 @@ class ApiTestGenerationTaskManager:
         if job is None:
             raise TaskNotFoundError(task_id)
         return job
+
+
+def _require_resolved_repo_path(
+    request: GenerateApiTestCodeRequest | GenerateApiTestsRequest,
+) -> None:
+    """The public contract resolves repo_path server-side (test_agent parity);
+    by the time work is enqueued it must be concrete."""
+    if not (request.repo_path or "").strip():
+        raise ValueError(
+            "repo_path was not resolved before enqueueing API test generation"
+        )
 
 
 task_manager = ApiTestGenerationTaskManager()

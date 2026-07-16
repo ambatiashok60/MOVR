@@ -61,7 +61,20 @@ POST /api/api-test-generation/generate-api-test-code
 POST /api/api-test-generation/generateApiTests
 ```
 
-The second endpoint mirrors the ScriptGen-style request shape.
+The second endpoint mirrors the ScriptGen-style request shape. Both routes are
+worktop/test_agent parity: the tenant is resolved from the authenticated
+request context, the repository path is resolved server-side from datasource
+configuration (payload value is a standalone fallback only), and the testcase
+name is loaded best-effort from the platform DAO.
+
+### `app/api/deps.py`
+
+Lazy bridge to the platform DB session dependency; yields `None` standalone.
+
+### `app/api/security.py`
+
+Tenant scoping and lazy JWT permission enforcement (test_agent parity).
+`REQUIRE_AUTHENTICATED_TENANT=true` must be set in platform deployments.
 
 ### `app/api/routes/job_routes.py`
 
@@ -180,6 +193,12 @@ Enum for queued/running/aborting/aborted/completed/failed.
 
 Immediate queue response containing `queued` and `task_id`.
 
+### `app/schemas/test_placement.py`
+
+Placement decision models (test_agent spec-placement parity): create-new vs
+extend-existing per generated file, with the full merged content for verified
+extensions, plus the exploration turn model for the placement agent loop.
+
 ## Runtime And LLM
 
 ### `app/runtime/generation_runtime.py`
@@ -229,6 +248,21 @@ output is unavailable.
 Generates API test code. Selects a strategy from the registry, builds a prompt
 with source context/mock plan, and uses strategy-specific fallback files if
 model output is unavailable.
+
+### `app/agents/test_placement_agent.py`
+
+Decides create-new vs extend-existing for each generated test file using the
+same agentic exploration loop as discovery, so the model reads the actual
+target files before proposing a merge.
+
+### `app/agents/critic_agent.py`
+
+Second model pass over generated tests before anything touches disk
+(test_agent critic_review parity), and again inside every execution-repair
+attempt. Consumes and produces `TestCodeOutput`, so generation, critique, and
+repair compose. The service enforces that the critic can revise files but
+never drop, add, or rename them; failures keep the original output; budget
+exhaustion still escalates. Disable with `ENABLE_CRITIC_REVIEW=false`.
 
 ### `app/prompts/api_scenario_prompt.py`
 
@@ -295,6 +329,19 @@ Writes generated files safely into the local repository.
 ### `app/services/api_repo_profile_service.py`
 
 Checks and generates `api_repo_profile.json`.
+
+### `app/services/repository_resolution_service.py`
+
+Server-side repository path resolution (datasource configuration wins, payload
+is a standalone fallback) and best-effort testcase-name lookup via lazy
+platform DAO imports.
+
+### `app/services/test_placement_service.py`
+
+Deterministic safety floor around the placement agent: a merge into an existing
+test file is accepted only when every coverage signal and detected test name
+from the original file provably survives; anything unprovable falls back to
+create-new.
 
 ## Strategies
 

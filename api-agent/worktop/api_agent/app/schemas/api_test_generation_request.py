@@ -11,7 +11,10 @@ class GenerateApiTestCodeRequest(BaseModel):
     scenario_name: str
     scenario_steps: list[str] = Field(default_factory=list)
     tenant_id: int | str | None = 1
-    repo_path: str
+    # Resolved server-side from datasource configuration when the platform
+    # stack is available (test_agent parity); payload value is a standalone
+    # fallback only. The task managers require it to be resolved by enqueue time.
+    repo_path: str | None = None
     story_id: str | None = None
     method: str | None = None
     endpoint: str | None = None
@@ -32,7 +35,7 @@ class GenerateApiTestsRequest(BaseModel):
     tenant_id: int | str | None = 1
     testcase_steps: list[str] = Field(default_factory=list)
     setup_steps: list[str] = Field(default_factory=list)
-    repo_path: str
+    repo_path: str | None = None
     service_name: str | None = None
     target_env: ExecutionTarget = ExecutionTarget.CI
     test_type: str | None = "integration"

@@ -27,6 +27,20 @@ class Settings(BaseSettings):
     enable_strategy_reasoning_review: bool = True
     allow_legacy_strategy_fallback: bool = True
     capability_discovery_max_rounds: int = 2
+    # ScriptGen-parity route hardening (mirrors worktop.test_agent):
+    # in the platform deployment auth middleware populates request.state.tenant_id
+    # and this must be True; standalone runs keep the payload-tenant fallback.
+    require_authenticated_tenant: bool = False
+    # Server-side repository resolution: when the platform datasource DAO is
+    # available the configured repo path wins over any client-supplied value.
+    default_repo_path: str | None = None
+    # Placement of generated tests into existing test files (extend-existing),
+    # mirroring worktop.test_agent spec placement.
+    enable_test_placement: bool = True
+    test_placement_max_turns: int = 3
+    # Critic pass over generated tests before they are written and after every
+    # repair attempt, mirroring worktop.test_agent critic_review.
+    enable_critic_review: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
