@@ -20,6 +20,7 @@ class TestActionDecisionAgent(BaseAgent):
         ranked_tests: list[BehavioralTestUnit],
         ui_context: PlaywrightUiContext | None = None,
         repo_path: str | None = None,
+        feedback: str | None = None,
     ) -> TestActionDecision:
         context = self.log_start("test_action")
         try:
@@ -32,6 +33,11 @@ class TestActionDecisionAgent(BaseAgent):
                 "based on real coverage, not excerpts. State your reasoning each "
                 "turn and a reason for every file you request."
             )
+            if feedback:
+                prompt += (
+                    "\n\nA previous attempt at this decision failed structured "
+                    f"resolution. Feedback:\n{feedback}"
+                )
             return self.complete_with_exploration(
                 prompt, TestActionTurn, repo_path or "."
             )

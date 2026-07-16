@@ -19,6 +19,7 @@ class SpecPlacementAgent(BaseAgent):
         inventory: RepositoryInventory,
         intent: FunctionalIntent | None = None,
         ui_context: PlaywrightUiContext | None = None,
+        feedback: str | None = None,
     ) -> SpecPlacementDecision:
         context = self.log_start("spec_placement")
         try:
@@ -34,6 +35,11 @@ class SpecPlacementAgent(BaseAgent):
                 "decide from file names alone. State your reasoning each turn and "
                 "give a reason for every file you request."
             )
+            if feedback:
+                prompt += (
+                    "\n\nA previous attempt at this decision failed structural "
+                    f"validation. Feedback:\n{feedback}"
+                )
             decision = self.complete_with_exploration(
                 prompt, SpecPlacementTurn, inventory.repo_path
             )

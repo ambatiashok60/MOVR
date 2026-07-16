@@ -45,6 +45,8 @@ class AnchorFlowContext(BaseModel):
     file_path: str
     describe_title: str | None = None
     anchor_test_title: str
+    start_line: int | None = None
+    end_line: int | None = None
     fixtures: list[str] = Field(default_factory=list)
     page_objects: list[str] = Field(default_factory=list)
     behavior_summary: str = ""

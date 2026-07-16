@@ -21,13 +21,15 @@ class SpecPlacementService:
         inventory: RepositoryInventory,
         intent: FunctionalIntent | None = None,
         ui_context: PlaywrightUiContext | None = None,
+        feedback: str | None = None,
     ) -> SpecPlacementDecision:
         logger.info(
-            "[playwright-generation] stage=spec_placement status=started test_files=%s",
+            "[playwright-generation] stage=spec_placement status=started test_files=%s has_feedback=%s",
             len(inventory.test_files),
+            feedback is not None,
         )
         try:
-            decision = self.agent.decide(inventory, intent, ui_context)
+            decision = self.agent.decide(inventory, intent, ui_context, feedback=feedback)
             logger.info(
                 "[playwright-generation] stage=spec_placement status=completed target=%s create_new=%s confidence=%s",
                 decision.target_spec_file,

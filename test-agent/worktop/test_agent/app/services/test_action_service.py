@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-
+from pathlib import PurePosixPath
 
 from worktop.test_agent.app.agents.candidate_test_ranking_agent import CandidateTestRankingAgent
 from worktop.test_agent.app.agents.test_action_decision_agent import TestActionDecisionAgent
@@ -27,15 +27,19 @@ class TestActionService:
         intent: FunctionalIntent | None = None,
         ui_context: PlaywrightUiContext | None = None,
         repo_path: str | None = None,
+        feedback: str | None = None,
     ) -> TestActionDecision:
         logger.info(
-            "[playwright-generation] stage=test_action status=started target_spec=%s candidates=%s",
+            "[playwright-generation] stage=test_action status=started target_spec=%s candidates=%s has_feedback=%s",
             placement.target_spec_file,
             len(candidates),
+            feedback is not None,
         )
         try:
             ranked = self.ranking_agent.rank(candidates, intent)
-            decision = self.decision_agent.decide(placement, ranked, ui_context, repo_path)
+            decision = self.decision_agent.decide(
+                placement, ranked, ui_context, repo_path, feedback=feedback
+            )
             decision = self._bind_selected_test_identity(decision, ranked)
             logger.info(
                 "[playwright-generation] stage=test_action status=completed action=%s target_test=%s",
@@ -84,6 +88,17 @@ class TestActionService:
         if len(matches) != 1:
             return decision
         selected = matches[0]
+        if decision.target_file_path:
+            agent_file = str(PurePosixPath(decision.target_file_path)).removeprefix("./")
+            ranked_file = str(PurePosixPath(selected.file_path)).removeprefix("./")
+            if agent_file != ranked_file:
+                logger.info(
+                    "[playwright-generation] stage=test_action "
+                    "status=kept_agent_discovered_identity agent_file=%s ranked_file=%s",
+                    agent_file,
+                    ranked_file,
+                )
+                return decision
         return decision.model_copy(
             update={
                 "target_test_title": selected.test_title,
