@@ -1,0 +1,694 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from worktop.api_agent.app.benchmark.benchmark_runner import BenchmarkRunner
+from worktop.api_agent.app.coverage.api_coverage_service import ApiCoverageService
+from worktop.api_agent.app.schemas.api_scenario_result import (
+    ApiScenarioGenerationResult,
+)
+from worktop.api_agent.app.schemas.api_test_generation_result import (
+    ApiTestGenerationResult,
+)
+from worktop.api_agent.app.schemas.benchmark import (
+    BenchmarkCase,
+    BenchmarkExpectation,
+    BenchmarkReport,
+)
+from worktop.api_agent.app.governance.generation_budget import (
+    BudgetedLLMClient,
+    BudgetExceededError,
+    GenerationBudget,
+)
+from worktop.api_agent.app.schemas.generation_budget import BudgetLimits
+from worktop.api_agent.app.schemas.api_scenario import ApiScenario
+from worktop.api_agent.app.schemas.repo_profile import RepoProfile
+from worktop.api_agent.app.schemas.api_scenario_request import GenerateApiScenariosRequest
+from worktop.api_agent.app.schemas.api_test_generation_request import (
+    GenerateApiTestCodeRequest,
+)
+from worktop.api_agent.app.schemas.generated_file import GeneratedFile
+from worktop.api_agent.app.policy.repository_policy_service import RepositoryPolicyService
+from worktop.api_agent.app.services.generation_manifest_service import (
+    GenerationManifestService,
+)
+from worktop.api_agent.app.services.review_report_service import ReviewReportService
+from worktop.api_agent.app.services.scenario_value_service import ScenarioValueService
+from worktop.api_agent.app.services.traceability_service import TraceabilityService
+from worktop.api_agent.app.security.data_governance_service import DataGovernanceService
+from worktop.api_agent.app.tools.repo_explorer import RepoExplorer
+from worktop.api_agent.app.task_managers.api_test_generation_task_manager import (
+    ApiTestGenerationTaskManager,
+)
+from worktop.api_agent.app.schemas.task_status import TaskStatus
+from worktop.api_agent.app.workspace.workspace_manager import (
+    WorkspaceLockedError,
+    WorkspaceManager,
+)
+from worktop.api_agent.app.strategies.strategy_registry import StrategyRegistry
+from worktop.api_agent.app.services.mock_stub_planning_service import MockStubPlanningService
+from worktop.api_agent.app.schemas.source_context import GenerationSourceContext, SourceSnippet
+
+EXISTING_TEST = """import io.restassured.RestAssured;
+
+class SohRecordsApiTest {
+    @Test
+    void returnsRecordsWithValidFilters() {
+        given().auth().oauth2(token)
+            .when().get("/api/soh-records")
+            .then().statusCode(200)
+            .body("records.size()", greaterThan(0));
+    }
+}
+"""
+
+
+class TestApiCoveragePreservation:
+    def test_entry_extracts_api_signals(self) -> None:
+        service = ApiCoverageService()
+
+        entry = service.entry_from_source("SohRecordsApiTest.java", EXISTING_TEST)
+
+        assert "/api/soh-records" in entry.endpoints
+        assert "200" in entry.status_assertions
+        assert any("records.size" in body for body in entry.body_assertions)
+        assert "oauth2" in entry.auth_signals
+
+    def test_updated_file_that_keeps_signals_is_preserved(self, tmp_path: Path) -> None:
+        service = ApiCoverageService()
+        test_file = tmp_path / "SohRecordsApiTest.java"
+        test_file.write_text(EXISTING_TEST, encoding="utf-8")
+        before = service.snapshot_files(str(tmp_path), ["SohRecordsApiTest.java"])
+
+        extended = EXISTING_TEST.replace(
+            "}\n",
+            "    @Test\n    void returnsEmptyList() {\n"
+            "        given().when().get(\"/api/soh-records?filter=none\")\n"
+            "            .then().statusCode(200);\n    }\n}\n",
+            1,
+        )
+        test_file.write_text(extended, encoding="utf-8")
+        after = service.snapshot_files(str(tmp_path), ["SohRecordsApiTest.java"])
+
+        report = service.compare(before, after)
+        assert report.coverage_preserved is True
+        [modification] = report.modified
+        assert modification.lost_signals == []
+        assert any("filter=none" in signal for signal in modification.gained_signals)
+        assert service.review_reasons(report) == []
+
+    def test_dropped_assertion_is_flagged_as_weakened(self, tmp_path: Path) -> None:
+        service = ApiCoverageService()
+        test_file = tmp_path / "SohRecordsApiTest.java"
+        test_file.write_text(EXISTING_TEST, encoding="utf-8")
+        before = service.snapshot_files(str(tmp_path), ["SohRecordsApiTest.java"])
+
+        weakened = EXISTING_TEST.replace(
+            '            .body("records.size()", greaterThan(0));\n', ""
+        )
+        test_file.write_text(weakened, encoding="utf-8")
+        after = service.snapshot_files(str(tmp_path), ["SohRecordsApiTest.java"])
+
+        report = service.compare(before, after)
+        assert report.coverage_preserved is False
+        [modification] = report.modified
+        assert any("records.size" in signal for signal in modification.lost_signals)
+        reasons = service.review_reasons(report)
+        assert any("Coverage weakened" in reason for reason in reasons)
+
+    def test_new_file_is_reported_as_added(self, tmp_path: Path) -> None:
+        service = ApiCoverageService()
+        before = service.snapshot_files(str(tmp_path), ["NewApiTest.java"])
+        (tmp_path / "NewApiTest.java").write_text(EXISTING_TEST, encoding="utf-8")
+        after = service.snapshot_files(str(tmp_path), ["NewApiTest.java"])
+
+        report = service.compare(before, after)
+
+        assert [entry.file_path for entry in report.added] == ["NewApiTest.java"]
+        assert report.coverage_preserved is True
+
+
+def _scenario(
+    scenario_id: str,
+    name: str,
+    *,
+    endpoint: str = "/api/soh-records",
+    method: str = "GET",
+    steps: list[str] | None = None,
+    assertions: list[str] | None = None,
+) -> ApiScenario:
+    return ApiScenario(
+        api_scenario_id=scenario_id,
+        scenario_name=name,
+        scenario_type="positive",
+        method=method,
+        endpoint=endpoint,
+        reason="test",
+        scenario_steps=steps if steps is not None else ["Call the endpoint"],
+        assertions=assertions
+        if assertions is not None
+        else ["Status code 200", "Records list is not empty"],
+    )
+
+
+class TestScenarioValueEvaluator:
+    def test_intra_batch_duplicate_is_flagged_and_consolidated(self) -> None:
+        service = ScenarioValueService()
+        first = _scenario("API_TC_001", "Retrieve SOH records with valid filters")
+        duplicate = _scenario(
+            "API_TC_002",
+            "Verify SOH records retrieval again",
+            steps=["Call the endpoint"],
+            assertions=["Status code 200", "Records list is not empty"],
+        )
+        profile = RepoProfile(repo_path="")
+
+        report = service.evaluate([first, duplicate], profile)
+
+        by_id = {a.api_scenario_id: a for a in report.assessments}
+        assert by_id["API_TC_001"].verdict == "NEW_COVERAGE"
+        assert by_id["API_TC_002"].verdict == "FULL_DUPLICATE"
+        assert by_id["API_TC_002"].duplicate_of == "API_TC_001"
+        assert by_id["API_TC_002"].duplicate_source == "generated_scenario"
+        assert report.requires_approval is True
+        assert any("approval required" in r for r in service.review_reasons(report))
+
+        kept, dropped = service.consolidate([first, duplicate], report)
+        assert [s.api_scenario_id for s in kept] == ["API_TC_001"]
+        assert [a.api_scenario_id for a in dropped] == ["API_TC_002"]
+
+    def test_distinct_scenarios_are_new_coverage(self) -> None:
+        service = ScenarioValueService()
+        positive = _scenario("API_TC_001", "Retrieve SOH records")
+        negative = _scenario(
+            "API_TC_002",
+            "Invalid employeeId returns 400",
+            endpoint="/api/soh-records",
+            steps=["Call the endpoint with an invalid employeeId"],
+            assertions=["Status code 400", "Error message mentions employeeId"],
+        )
+
+        report = service.evaluate([positive, negative], RepoProfile(repo_path=""))
+
+        verdicts = {a.api_scenario_id: a.verdict for a in report.assessments}
+        assert verdicts["API_TC_002"] in ("NEW_COVERAGE", "MEANINGFUL_VARIATION")
+        assert report.requires_approval is False
+
+    def test_assertionless_scenario_is_low_value(self) -> None:
+        service = ScenarioValueService()
+        hollow = _scenario("API_TC_003", "Just call it", assertions=[])
+
+        report = service.evaluate([hollow], RepoProfile(repo_path=""))
+
+        assert report.assessments[0].verdict == "LOW_VALUE"
+        assert any("low value" in r for r in service.review_reasons(report))
+
+
+class TestRequirementTraceability:
+    def test_acceptance_criteria_map_to_scenarios(self) -> None:
+        service = TraceabilityService()
+        request = GenerateApiScenariosRequest(
+            user_story_hierarchy_id=1,
+            repo_path="/tmp/repo",
+            acceptance_criteria=[
+                "Records are returned for valid filters",
+                "Export quarterly payroll summary as PDF",
+            ],
+        )
+        scenarios = [
+            _scenario(
+                "API_TC_001",
+                "Retrieve SOH records with valid filters",
+                steps=["Call endpoint with valid filters"],
+                assertions=["Records returned", "Status code 200"],
+            )
+        ]
+
+        matrix = service.trace_scenarios(request, scenarios)
+
+        by_requirement = {t.requirement: t for t in matrix.requirements}
+        covered = by_requirement["Records are returned for valid filters"]
+        assert covered.status == "covered"
+        assert covered.covered_by == "API_TC_001"
+        assert covered.source == "scenario"
+        missing = by_requirement["Export quarterly payroll summary as PDF"]
+        assert missing.status == "missing"
+        assert matrix.complete is False
+        assert any("not traceable" in r for r in service.review_reasons(matrix))
+
+    def test_scenario_steps_map_to_generated_code(self, tmp_path: Path) -> None:
+        service = TraceabilityService()
+        test_file = tmp_path / "src" / "test" / "SohRecordsApiTest.java"
+        test_file.parent.mkdir(parents=True)
+        test_file.write_text(
+            "void returnsRecords() {\n"
+            "  // Step: call soh-records endpoint with valid employee filters\n"
+            "  // Assert: status code 200; records field is not null\n"
+            "  given().when().get(\"/api/soh-records\")\n"
+            "    .then().statusCode(200).body(\"records\", notNullValue());\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        request = GenerateApiTestCodeRequest(
+            user_story_hierarchy_id=1,
+            api_scenario_id="API_TC_001",
+            scenario_name="Retrieve SOH records",
+            repo_path=str(tmp_path),
+            scenario_steps=["Call soh-records endpoint with valid employee filters"],
+            assertions=["Status code 200", "Records field is not null"],
+        )
+        generated = [
+            GeneratedFile(
+                path="src/test/SohRecordsApiTest.java",
+                test_target="ci",
+                summary="generated",
+            )
+        ]
+
+        matrix = service.trace_code(request, generated)
+
+        assert matrix.complete is True
+        assert all(t.covered_by == "src/test/SohRecordsApiTest.java" for t in matrix.requirements)
+        assert service.review_reasons(matrix) == []
+
+
+class TestApiReviewReport:
+    def test_report_condenses_generation_into_reviewable_sections(
+        self, tmp_path: Path
+    ) -> None:
+        service = ReviewReportService()
+        test_file = tmp_path / "src" / "test" / "SohRecordsApiTest.java"
+        test_file.parent.mkdir(parents=True)
+        test_file.write_text(EXISTING_TEST, encoding="utf-8")
+        request = GenerateApiTestCodeRequest(
+            user_story_hierarchy_id=1,
+            api_scenario_id="API_TC_001",
+            scenario_name="Retrieve SOH records",
+            repo_path=str(tmp_path),
+            method="GET",
+            endpoint="/api/soh-records",
+        )
+        generated = [
+            GeneratedFile(
+                path="src/test/SohRecordsApiTest.java",
+                test_target="ci",
+                summary="Integration test for SOH records retrieval",
+            )
+        ]
+
+        report = service.build(
+            request,
+            generated_files=generated,
+            strategy_name="java_spring_rest_assured",
+            strategy_reasons=["RestAssured detected in build.gradle"],
+            reused_example_paths=["src/test/ExistingApiTest.java"],
+            validation=None,
+            review_reasons=["Scenario targets an undetected endpoint."],
+        )
+
+        assert "GET /api/soh-records" in report.summary
+        assert report.strategy == "java_spring_rest_assured"
+        assert report.files_changed[0].path == "src/test/SohRecordsApiTest.java"
+        assert any("statusCode(200)" in a for a in report.assertions_added)
+        assert report.validation_summary == "Validation was not run."
+        assert report.remaining_risks == ["Scenario targets an undetected endpoint."]
+        for heading in (
+            "# API Generation Review Report",
+            "## Files Changed",
+            "## Strategy",
+            "## Why this strategy",
+            "## Mocks & Stubs Planned",
+            "## Examples Reused",
+            "## Assertions Added",
+            "## Validation",
+            "## Remaining Risks",
+        ):
+            assert heading in report.markdown
+
+
+class TestRepositoryPolicy:
+    def test_defaults_apply_when_no_policy_file_exists(self, tmp_path: Path) -> None:
+        service = RepositoryPolicyService()
+
+        policy = service.load(str(tmp_path))
+
+        assert policy.source == "defaults"
+        assert policy.generation.forbid_real_network_in_ci is True
+        assert policy.generation.allow_full_duplicates is False
+
+    def test_policy_file_loads_without_yaml_dependency(self, tmp_path: Path) -> None:
+        service = RepositoryPolicyService()
+        policy_dir = tmp_path / ".movr"
+        policy_dir.mkdir()
+        (policy_dir / "api-agent-policy.yaml").write_text(
+            "generation:\n"
+            "  forbid_real_network_in_ci: true\n"
+            "  require_negative_scenarios: true\n"
+            "  allowed_test_frameworks: [restassured, mockmvc]\n"
+            "  max_files_per_generation: 2\n",
+            encoding="utf-8",
+        )
+
+        policy = service.load(str(tmp_path))
+
+        assert policy.source == ".movr/api-agent-policy.yaml"
+        assert policy.generation.require_negative_scenarios is True
+        assert policy.generation.allowed_test_frameworks == ["restassured", "mockmvc"]
+        assert policy.generation.max_files_per_generation == 2
+
+    def test_file_findings_flag_real_network_and_framework_violations(self) -> None:
+        service = RepositoryPolicyService()
+        policy = service.load("/nonexistent")
+        policy.generation.allowed_test_frameworks = ["restassured"]
+
+        findings = service.file_findings(
+            policy,
+            [
+                (
+                    "src/test/BadTest.java",
+                    "ci",
+                    "client.get(\"https://payments.example.com/charge\")",
+                ),
+                ("src/test/GoodTest.java", "ci", "import io.restassured.RestAssured;"),
+            ],
+        )
+
+        assert any("real network calls" in f for f in findings)
+        assert any("restricts test frameworks" in f and "BadTest" in f for f in findings)
+        assert not any("GoodTest" in f and "network" in f for f in findings)
+
+    def test_scenario_findings_require_negative_scenarios(self) -> None:
+        service = RepositoryPolicyService()
+        policy = service.load("/nonexistent")
+        policy.generation.require_negative_scenarios = True
+
+        findings = service.scenario_findings(
+            policy, [_scenario("API_TC_001", "positive only")]
+        )
+
+        assert findings == ["Policy requires at least one negative scenario; the plan has none."]
+
+
+class TestGenerationManifest:
+    def _profile(self) -> RepoProfile:
+        from worktop.api_agent.app.schemas.repo_profile import (
+            ApiEndpointCandidate,
+            ExistingApiTestCandidate,
+        )
+
+        return RepoProfile(
+            repo_path="/tmp/repo",
+            test_frameworks=["restassured"],
+            endpoints=[
+                ApiEndpointCandidate(
+                    method="GET", path="/api/soh-records", source_file="Controller.java"
+                )
+            ],
+            existing_tests=[ExistingApiTestCandidate(path="src/test/Existing.java")],
+        )
+
+    def test_manifest_freezes_run_inputs_and_decisions(self) -> None:
+        service = GenerationManifestService()
+
+        manifest = service.build(
+            "task-1",
+            "/tmp/repo",
+            profile=self._profile(),
+            model_provider="anthropic",
+            story_material=["Retrieve SOH records", "Status 200"],
+            decisions=[("strategy_selection", "java_spring_rest_assured", "high")],
+            artifacts=[("src/test/SohTest.java", "class SohTest {}")],
+        )
+
+        assert manifest.repository_snapshot_digest != ""
+        assert manifest.prompt_versions
+        assert all(len(d) == 12 for d in manifest.prompt_versions.values())
+        assert manifest.settings_snapshot["max_generation_repair_attempts"] == "2"
+        assert manifest.decisions[0].decision == "java_spring_rest_assured"
+        assert manifest.artifacts[0].content_digest != ""
+        assert manifest.generation_fingerprint != ""
+
+    def test_same_inputs_same_fingerprint_changed_inputs_differ(self) -> None:
+        service = GenerationManifestService()
+        kwargs = dict(
+            profile=self._profile(),
+            model_provider="anthropic",
+            story_material=["Retrieve SOH records"],
+        )
+
+        first = service.build("task-1", "/tmp/repo", **kwargs)
+        second = service.build("task-2", "/tmp/repo", **kwargs)
+        changed = service.build(
+            "task-3",
+            "/tmp/repo",
+            profile=self._profile(),
+            model_provider="anthropic",
+            story_material=["A totally different story"],
+        )
+
+        assert first.generation_fingerprint == second.generation_fingerprint
+        assert first.generation_fingerprint != changed.generation_fingerprint
+
+
+class TestGenerationBudget:
+    def test_llm_calls_beyond_limit_escalate(self) -> None:
+        budget = GenerationBudget(
+            limits=BudgetLimits(max_llm_calls=1), enforcement_mode="strict"
+        )
+
+        budget.charge_llm_call(prompt_chars=10)
+        with pytest.raises(BudgetExceededError) as excinfo:
+            budget.charge_llm_call(prompt_chars=10)
+
+        assert "llm_calls used 2 of 1" in str(excinfo.value)
+        assert excinfo.value.report.escalated is True
+
+    def test_budgeted_client_charges_model_and_repository_reads(self) -> None:
+        class FakeClient:
+            def complete(self, prompt: str) -> str:
+                return "ok"
+
+            def complete_structured(self, prompt: str, response_model: type) -> object:
+                return object()
+
+        budget = GenerationBudget(limits=BudgetLimits())
+        client = BudgetedLLMClient(FakeClient(), budget)
+
+        client.complete("prompt")
+        client.complete_structured(prompt="structured", response_model=object)
+        client.charge_repository_read()
+        report = budget.report()
+
+        assert report.usage.llm_calls == 2
+        assert report.usage.repository_reads == 1
+        assert report.usage.prompt_chars == len("prompt") + len("structured")
+        assert report.escalated is False
+
+    def test_time_budget_escalates(self) -> None:
+        budget = GenerationBudget(
+            limits=BudgetLimits(max_generation_seconds=0.0), enforcement_mode="strict"
+        )
+
+        with pytest.raises(BudgetExceededError) as excinfo:
+            budget.charge_tool_call()
+
+        assert "elapsed" in str(excinfo.value)
+
+    def test_review_mode_records_overage_without_blocking_generation(self) -> None:
+        budget = GenerationBudget(
+            limits=BudgetLimits(max_llm_calls=1), enforcement_mode="review"
+        )
+
+        budget.charge_llm_call(prompt_chars=10)
+        budget.charge_llm_call(prompt_chars=20)
+        report = budget.report()
+
+        assert report.review_required is True
+        assert report.enforcement_mode == "review"
+        assert report.usage.llm_calls == 2
+        assert any("llm_calls used 2 of 1" in reason for reason in report.exceeded_thresholds)
+
+
+class TestRegressionBenchmark:
+    def test_golden_cases_file_loads(self) -> None:
+        runner = BenchmarkRunner()
+        cases = runner.load_cases(
+            Path(__file__).parent.parent / "benchmarks" / "golden_cases.json"
+        )
+
+        assert [case.kind for case in cases] == ["scenario_plan", "code_generation"]
+        assert cases[0].expected.min_scenarios == 4
+
+    def test_report_scores_both_workflows(self) -> None:
+        runner = BenchmarkRunner()
+        cases = [
+            BenchmarkCase(
+                name="plan-ok",
+                kind="scenario_plan",
+                expected=BenchmarkExpectation(
+                    min_scenarios=2, expected_scenario_types=["positive", "negative"]
+                ),
+            ),
+            BenchmarkCase(
+                name="code-missing-files",
+                kind="code_generation",
+                expected=BenchmarkExpectation(expect_generated_files=True),
+            ),
+        ]
+
+        def generate_scenarios(request):
+            return ApiScenarioGenerationResult(
+                task_id="t",
+                user_story_hierarchy_id=0,
+                scenarios=[
+                    _scenario("API_TC_001", "positive case"),
+                    ApiScenario(
+                        api_scenario_id="API_TC_002",
+                        scenario_name="negative case",
+                        scenario_type="negative",
+                        reason="test",
+                        scenario_steps=["call"],
+                        assertions=["400"],
+                    ),
+                ],
+            )
+
+        def generate_code(request):
+            return ApiTestGenerationResult(
+                task_id="t",
+                user_story_hierarchy_id=0,
+                api_scenario_id=request.api_scenario_id,
+                generated_files=[],
+                summary="nothing",
+            )
+
+        report = runner.run(
+            cases,
+            generate_scenarios=generate_scenarios,
+            generate_code=generate_code,
+        )
+
+        assert report.metrics["scenario_plan_accuracy"] == 1.0
+        assert report.metrics["code_generation_accuracy"] == 0.0
+        assert report.metrics["case_pass_rate"] == 0.5
+        failing = next(o for o in report.outcomes if o.case == "code-missing-files")
+        assert "expected generated files" in failing.failures[0]
+
+    def test_errors_are_recorded_not_raised(self) -> None:
+        runner = BenchmarkRunner()
+
+        def boom(request):
+            raise RuntimeError("model unavailable")
+
+        report = runner.run(
+            [BenchmarkCase(name="boom", kind="scenario_plan")],
+            generate_scenarios=boom,
+        )
+
+        [outcome] = report.outcomes
+        assert outcome.passed is False
+        assert "RuntimeError" in outcome.error
+
+    def test_regression_detection_between_reports(self) -> None:
+        runner = BenchmarkRunner()
+        baseline = BenchmarkReport(
+            metrics={"scenario_plan_accuracy": 1.0, "avg_latency_ms": 90.0}
+        )
+        current = BenchmarkReport(
+            metrics={"scenario_plan_accuracy": 0.5, "avg_latency_ms": 200.0}
+        )
+
+        regressions = {r.metric for r in runner.detect_regressions(baseline, current)}
+
+        assert regressions == {"scenario_plan_accuracy", "avg_latency_ms"}
+
+
+class TestWorkspaceIsolation:
+    def test_same_repository_cannot_be_written_by_two_jobs(self, tmp_path: Path) -> None:
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        manager = WorkspaceManager(workspace_root=str(tmp_path / "workspaces"))
+        first = manager.acquire("job-1", str(repo))
+        try:
+            with pytest.raises(WorkspaceLockedError):
+                manager.acquire("job-2", str(repo))
+        finally:
+            manager.release(first)
+        second = manager.acquire("job-2", str(repo))
+        manager.release(second)
+
+
+class TestApiIdempotency:
+    def test_completed_and_running_tasks_are_reused_but_failed_tasks_retry(self) -> None:
+        manager = ApiTestGenerationTaskManager()
+        try:
+            key = "tenant:story:scenario:default"
+            task_id = manager._create_job("api_test_generation", {}, key)
+            assert manager._reusable_task_id(key) == task_id
+            assert manager._reusable_task_id(key, {"repo_path": "/different"}) is None
+
+            with manager._lock:
+                manager._jobs[task_id].status = TaskStatus.COMPLETED
+            assert manager._reusable_task_id(key) == task_id
+
+            with manager._lock:
+                manager._jobs[task_id].status = TaskStatus.FAILED
+            assert manager._reusable_task_id(key) is None
+        finally:
+            manager._executor.shutdown(wait=False, cancel_futures=True)
+
+
+class TestRepositoryDataGovernance:
+    def test_restricted_files_are_blocked_and_secrets_are_redacted(self, tmp_path: Path) -> None:
+        (tmp_path / ".env").write_text("API_KEY=super-secret-value", encoding="utf-8")
+        (tmp_path / "client.py").write_text(
+            "password=hunter2secret\nname=soh-client\n", encoding="utf-8"
+        )
+        governance = DataGovernanceService()
+        explorer = RepoExplorer(governance)
+
+        blocked = explorer.read_file(tmp_path, ".env")
+        released = explorer.read_file(tmp_path, "client.py")
+
+        assert "restricted by the repository data policy" in blocked
+        assert "hunter2secret" not in released
+        assert "[REDACTED]" in released
+        assert "soh-client" in released
+        assert governance.audit.files_blocked == [".env"]
+        assert governance.audit.redactions == 1
+
+
+class TestTechnologyStrategyBoundary:
+    def test_api_registry_exposes_multiple_repository_native_strategies(self) -> None:
+        registry = StrategyRegistry()
+        names = set(registry.registered())
+
+        assert "java_spring_rest_assured" in names
+        assert "java_spring_mockmvc" in names
+        assert "python_fastapi_testclient" in names
+        assert "python_pytest_httpx" in names
+
+
+class TestAutonomousMockPlanning:
+    def test_runtime_infrastructure_requires_approval_but_produces_a_plan(self) -> None:
+        source = SourceSnippet(
+            path="src/main/java/SohController.java",
+            reason="endpoint",
+            content=(
+                "class SohController { private final KafkaTemplate kafkaTemplate; "
+                "SohController(KafkaTemplate kafkaTemplate) { this.kafkaTemplate = kafkaTemplate; } }"
+            ),
+        )
+        profile = RepoProfile(repo_path="/tmp/repo")
+
+        plan = MockStubPlanningService().plan(
+            profile, GenerationSourceContext(endpoint_sources=[source])
+        )
+
+        assert plan.risk_level == "high"
+        assert plan.approval_required is True
+        assert any("message_broker" in signal for signal in plan.runtime_signals)
+        assert plan.provisioning_actions
+        assert "do not embed credentials" in (plan.auth_strategy or "")

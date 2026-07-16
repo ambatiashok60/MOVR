@@ -61,7 +61,20 @@ POST /api/api-test-generation/generate-api-test-code
 POST /api/api-test-generation/generateApiTests
 ```
 
-The second endpoint mirrors the ScriptGen-style request shape.
+The second endpoint mirrors the ScriptGen-style request shape. Both routes are
+worktop/test_agent parity: the tenant is resolved from the authenticated
+request context, the repository path is resolved server-side from datasource
+configuration (payload value is a standalone fallback only), and the testcase
+name is loaded best-effort from the platform DAO.
+
+### `app/api/deps.py`
+
+Lazy bridge to the platform DB session dependency; yields `None` standalone.
+
+### `app/api/security.py`
+
+Tenant scoping and lazy JWT permission enforcement (test_agent parity).
+`REQUIRE_AUTHENTICATED_TENANT=true` must be set in platform deployments.
 
 ### `app/api/routes/job_routes.py`
 
@@ -146,6 +159,11 @@ helpers to reuse, dependencies to mock, generated stub intentions, and warnings.
 
 Structured LLM output models for scenario planning and test-code generation.
 
+### `app/schemas/repo_understanding.py`
+
+`DiscoveryRequest`, `DiscoveryTurn`, and `RepoUnderstanding` — the discovery
+loop protocol and its evidence-grounded conclusion (any language/stack).
+
 ### `app/schemas/generated_file.py`
 
 Generated file summary: path, operation, test target, and summary.
@@ -175,6 +193,12 @@ Enum for queued/running/aborting/aborted/completed/failed.
 
 Immediate queue response containing `queued` and `task_id`.
 
+### `app/schemas/test_placement.py`
+
+Placement decision models (test_agent spec-placement parity): create-new vs
+extend-existing per generated file, with the full merged content for verified
+extensions, plus the exploration turn model for the placement agent loop.
+
 ## Runtime And LLM
 
 ### `app/runtime/generation_runtime.py`
@@ -193,7 +217,9 @@ falls back only for local scaffold use.
 ### `app/llm/worktop_model_client_adapter.py`
 
 Adapter around Worktop model infrastructure. It tries `DefaultLLMClient` first,
-then the lower-level `ModelClientFactory` path.
+then the lower-level `ModelClientFactory` path. `complete_structured` extracts
+JSON from fenced/prose-wrapped responses and performs one repair retry with the
+Pydantic validation error before raising.
 
 ### `app/llm/local_fallback_client.py`
 
@@ -201,6 +227,12 @@ Local-only fallback so the scaffold can be imported in environments without the
 full Worktop model runtime.
 
 ## Agents And Prompts
+
+### `app/agents/repo_discovery_agent.py`
+
+Model-directed repository discovery (Codex/Claude Code style): a bounded
+read_file/search/list_dir tool loop that concludes with an evidence-grounded
+`RepoUnderstanding`. Failure never blocks generation.
 
 ### `app/agents/base_agent.py`
 
@@ -217,6 +249,21 @@ Generates API test code. Selects a strategy from the registry, builds a prompt
 with source context/mock plan, and uses strategy-specific fallback files if
 model output is unavailable.
 
+### `app/agents/test_placement_agent.py`
+
+Decides create-new vs extend-existing for each generated test file using the
+same agentic exploration loop as discovery, so the model reads the actual
+target files before proposing a merge.
+
+### `app/agents/critic_agent.py`
+
+Second model pass over generated tests before anything touches disk
+(test_agent critic_review parity), and again inside every execution-repair
+attempt. Consumes and produces `TestCodeOutput`, so generation, critique, and
+repair compose. The service enforces that the critic can revise files but
+never drop, add, or rename them; failures keep the original output; budget
+exhaustion still escalates. Disable with `ENABLE_CRITIC_REVIEW=false`.
+
 ### `app/prompts/api_scenario_prompt.py`
 
 Prompt builder for scenario generation.
@@ -228,7 +275,10 @@ guidance, existing tests, source snippets, fixtures, and mock/stub plan.
 
 ### `app/prompts/prompt_sections.py`
 
-Reusable renderers for repo profile, source context, and mock/stub plan.
+Reusable renderers for repo profile, source context, and mock/stub plan, plus
+`response_contract()` — the schema-derived response contract with canonical
+valid/invalid examples for `ScenarioPlanOutput` and `TestCodeOutput`, so
+prompts can never drift from the Pydantic schemas.
 
 ## Services
 
@@ -261,13 +311,16 @@ helpers, and outbound service signals.
 
 ### `app/services/api_scenario_generation_service.py`
 
-Thin service around `ScenarioAgent`, returning scenario results with repo
-findings and warnings.
+Service around `ScenarioAgent` with a deterministic scenario guard: drops
+duplicate ids and scenarios without steps/assertions, flags scenarios targeting
+undetected endpoints into `review_reasons`, and sets `needs_review`.
 
 ### `app/services/api_test_code_generation_service.py`
 
-Runs `TestGenerationAgent`, writes generated files, validates, and builds the
-final API test generation result.
+Runs `TestGenerationAgent`, passes the output through `GeneratedFileGuard`
+before writing, falls back to deterministic strategy skeleton files when the
+guard rejects everything, validates, and builds the final result with
+`needs_review` / `review_reasons`.
 
 ### `app/services/api_test_file_writer.py`
 
@@ -276,6 +329,19 @@ Writes generated files safely into the local repository.
 ### `app/services/api_repo_profile_service.py`
 
 Checks and generates `api_repo_profile.json`.
+
+### `app/services/repository_resolution_service.py`
+
+Server-side repository path resolution (datasource configuration wins, payload
+is a standalone fallback) and best-effort testcase-name lookup via lazy
+platform DAO imports.
+
+### `app/services/test_placement_service.py`
+
+Deterministic safety floor around the placement agent: a merge into an existing
+test file is accepted only when every coverage signal and detected test name
+from the original file provably survives; anything unprovable falls back to
+create-new.
 
 ## Strategies
 
@@ -372,7 +438,16 @@ Small Git helper for current branch and changed files.
 
 ### `app/validation/api_test_validator.py`
 
-Validates generated files exist and delegates command resolution.
+Validates generated files exist and delegates command resolution; passes the
+env-gated `execute` flag through to real command execution.
+
+### `app/validation/generated_file_guard.py`
+
+Deterministic pre-write review of LLM-generated files: path must be provably a
+test file (detected team test locations or per-language test naming), never
+application source; content must carry a test-framework signal and assertions;
+`test_target` must match the requested execution target. Rejected files are
+dropped with review reasons.
 
 ### `app/validation/validation_command_resolver.py`
 
@@ -407,6 +482,13 @@ Worktop logging imports are unavailable.
 
 Backend test plan. Lists the unit/integration tests needed before UI
 integration.
+
+### `tests/test_generation_hardening.py`
+
+Unit tests for the hardening layer: Literal contract validation, adapter fence
+extraction and repair retry, schema-derived prompt contracts, the scenario
+guard, the generated-file write guard, and the service-level fallback when all
+generated files are rejected.
 
 ## Frontend Files
 

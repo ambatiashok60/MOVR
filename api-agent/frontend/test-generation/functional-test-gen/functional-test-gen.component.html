@@ -1,4 +1,13 @@
-<section class="functional-placeholder">
-  <h2>Functional Test Generation</h2>
-  <p>This area should render the existing functional test generation experience from the host app.</p>
+<section class="functional-grid">
+  <div class="functional-card">
+    <header><div><h2>Testcases</h2><p>AI-generated functional test cases based on the selected story and repository.</p></div><button class="primary" [disabled]="!selectedStory || !repoPath || facade.store.generatingScenarios()" (click)="generateScenarios()">{{ facade.store.generatingScenarios() ? 'Generating…' : 'Generate Test Cases' }}</button></header>
+    <div class="toolbar"><select><option>All Techniques</option></select><select><option>All Status</option></select><select><option>All Risk Levels</option></select><input placeholder="Search test case…" /><button>Filters</button></div>
+    <table><thead><tr><th></th><th>Test Case ID</th><th>Test Case</th><th>Technique</th><th>Priority</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+      <tr *ngFor="let item of facade.store.testCases()" [class.selected]="facade.store.openId() === item.id" (click)="open(item)"><td><input type="checkbox" [checked]="facade.store.selectedIds().includes(item.id)" (click)="$event.stopPropagation(); facade.toggle(item.id)" /></td><td class="id">{{ item.id }}</td><td>{{ item.title }}</td><td>{{ item.technique }}</td><td><span class="badge priority">{{ item.priority }}</span></td><td><span class="badge">{{ item.status }}</span></td><td class="actions"><button title="Generate code" (click)="$event.stopPropagation(); generateCode(item)">▷</button><button title="Edit">✎</button><button title="View" (click)="$event.stopPropagation(); open(item)">⊙</button><button title="Delete">♧</button><button>›</button></td></tr>
+      <tr *ngIf="!facade.store.testCases().length"><td colspan="7" class="empty">Generate test cases to preview the Functional Tests experience.</td></tr>
+    </tbody></table>
+    <footer>1 to {{ facade.store.testCases().length }} of {{ facade.store.testCases().length || 0 }} <button>‹</button><button class="page">1</button><button>›</button></footer>
+    <p class="error" *ngIf="facade.store.error()">{{ facade.store.error() }}</p>
+  </div>
+  <aside class="drawer" *ngIf="facade.opened() as item"><header><strong>{{ item.id }}</strong><span class="badge">{{ item.status }}</span><button (click)="facade.store.openId.set(null)">×</button></header><nav><b>Overview</b><span>Steps</span><span>Data</span><span>Gen Plan</span></nav><h3>{{ item.title }}</h3><p>{{ item.description }}</p><dl><dt>Technique</dt><dd>{{ item.technique }}</dd><dt>Priority</dt><dd>{{ item.priority }}</dd><dt>Status</dt><dd>{{ item.status }}</dd><dt>Risk Level</dt><dd>{{ item.riskLevel }}</dd><dt>Owner</dt><dd>{{ item.owner || '-' }}</dd></dl><section><h4>Expected Results</h4><p *ngFor="let result of item.expectedResults">✓ {{ result }}</p></section><small>Last Updated<br />{{ item.lastUpdated }} by Ashok</small><button class="primary generate" [disabled]="facade.store.generatingCodeForId() === item.id" (click)="generateCode(item)">{{ facade.store.generatingCodeForId() === item.id ? 'Generating…' : '▷ Generate Code' }}</button></aside>
 </section>
