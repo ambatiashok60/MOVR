@@ -1,0 +1,12 @@
+{
+  "name": "MOVR Preview",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:1-20-bookworm",
+  "features": { "ghcr.io/devcontainers/features/python:1": { "version": "3.11" } },
+  "forwardPorts": [4200, 8000],
+  "portsAttributes": {
+    "4200": { "label": "Combined Angular Preview", "onAutoForward": "openPreview" },
+    "8000": { "label": "AI Workspace Mock Backend", "onAutoForward": "silent" }
+  },
+  "postCreateCommand": "cd ai-workspace/frontend && corepack enable && pnpm install --frozen-lockfile && cd ../backend && pip install -e '.[dev]'",
+  "customizations": { "vscode": { "extensions": ["Angular.ng-template", "ms-python.python"] } }
+}

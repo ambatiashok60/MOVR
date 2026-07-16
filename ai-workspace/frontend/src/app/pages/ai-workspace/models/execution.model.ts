@@ -22,4 +22,23 @@ export interface ExecutionRun {
   startedAt: string;
   completedAt?: string;
   errorMessage?: string;
+  needsReview?: boolean;
+  reviewReasons?: string[];
+  budgetUsage?: {
+    llm_calls?: number;
+    prompt_characters?: number;
+    completion_characters?: number;
+    elapsed_seconds?: number;
+  };
+  engineeringReview?: {
+    quality_score: number;
+    risk_level: string;
+    confidence: number;
+    root_cause?: string | null;
+    evidence: string[];
+    validation: string[];
+    remaining_risks: string[];
+    approval_required: boolean;
+  };
+  isolatedWorkspacePath?: string | null;
 }
