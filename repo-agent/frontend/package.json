@@ -1,0 +1,37 @@
+{
+  "name": "repo-agent-frontend",
+  "version": "0.1.0",
+  "description": "RepoAgent Angular single-page workspace UI",
+  "scripts": {
+    "prestart": "node scripts/check-runtime.mjs",
+    "start": "ng serve --proxy-config proxy.conf.json",
+    "prebuild": "node scripts/check-runtime.mjs",
+    "build": "ng build",
+    "test": "ng test",
+    "e2e": "playwright test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "private": true,
+  "dependencies": {
+    "@angular/animations": "^17.3.0",
+    "@angular/common": "^17.3.0",
+    "@angular/compiler": "^17.3.0",
+    "@angular/core": "^17.3.0",
+    "@angular/forms": "^17.3.0",
+    "@angular/platform-browser": "^17.3.0",
+    "@angular/platform-browser-dynamic": "^17.3.0",
+    "@angular/router": "^17.3.0",
+    "rxjs": "~7.8.0",
+    "tslib": "^2.6.0",
+    "zone.js": "~0.14.0"
+  },
+  "devDependencies": {
+    "@angular-devkit/build-angular": "^17.3.0",
+    "@angular/cli": "^17.3.0",
+    "@angular/compiler-cli": "^17.3.0",
+    "@playwright/test": "^1.44.0",
+    "typescript": "~5.4.0"
+  }
+}

@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+*.db
+*.db-wal
+*.db-shm
+
+# Node / Angular
+node_modules/
+dist/
+.angular/
+
+# Playwright
+frontend/test-results/
+frontend/playwright-report/
+frontend/e2e.db*
+
+# Env
+.venv/
+venv/
+
+# Local runtime persistence (keep the directory, ignore generated contents)
+backend/data/*
+!backend/data/.gitkeep
