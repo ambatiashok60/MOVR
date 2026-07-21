@@ -85,3 +85,16 @@ def test_bad_workspace_is_rejected():
             return type(exc).__name__
 
     assert run_async(go()) == "WorkspaceError"
+
+
+def test_local_persistence_directory_is_created_automatically(tmp_path):
+    from app.persistence.database import Database
+
+    path = tmp_path / "nested" / "data" / "repo_agent.db"
+    assert not path.parent.exists()
+
+    database = Database(str(path))
+    try:
+        assert path.exists()
+    finally:
+        database.close()

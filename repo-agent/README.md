@@ -18,7 +18,42 @@ repo-agent/
 └── docs/        architecture, TDD, security, operations, deployment, contracts
 ```
 
-## Quick start (backend + local preview)
+## Recommended setup (Conda + Angular UI)
+
+```bash
+cd repo-agent
+conda env create -f environment.yml
+conda activate repo-agent
+
+cp backend/.env.example backend/.env
+# Edit backend/.env and set your AWS profile.
+
+cd frontend
+npm install
+cd ..
+
+./run-dev.sh
+```
+
+Open **http://localhost:4200**. The launcher starts FastAPI on port 8080 and
+Angular on port 4200, and stops the backend when you exit. The Conda environment
+contains Python 3.11, Node.js 20, backend dependencies, and `boto3`.
+
+No database server is required for local development. Conversations, runs,
+events, plans, response batches, file-change metadata, and validation results
+are stored in the automatically created `backend/data/repo_agent.db` embedded
+state file. Runtime contents under `backend/data/` are ignored by Git.
+
+Update an existing environment with:
+
+```bash
+conda env update -f environment.yml --prune
+```
+
+Install AWS CLI v2 separately for SSO, then run
+`aws sso login --profile your-sso-profile`.
+
+## Lightweight start (backend + local preview)
 
 ```bash
 cd backend

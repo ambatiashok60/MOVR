@@ -20,7 +20,9 @@ class Settings(BaseSettings):
     )
 
     # --- Persistence -------------------------------------------------------
-    database_path: str = "./repo_agent.db"
+    # Local embedded persistence. The parent directory is created automatically;
+    # no external database server or setup step is required.
+    database_path: str = "./data/repo_agent.db"
 
     # --- Agent loop / conversation ----------------------------------------
     max_agent_iterations: int = 20

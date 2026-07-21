@@ -1,0 +1,3 @@
+# Full backend environment for real AWS Bedrock usage.
+-r requirements.txt
+boto3>=1.34

@@ -19,3 +19,7 @@ frontend/e2e.db*
 # Env
 .venv/
 venv/
+
+# Local runtime persistence (keep the directory, ignore generated contents)
+backend/data/*
+!backend/data/.gitkeep

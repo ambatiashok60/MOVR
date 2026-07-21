@@ -21,7 +21,71 @@ see [integration-contract.md](integration-contract.md).
 
 ---
 
-## 2. Run the backend (+ local preview)
+## 2. Recommended Conda setup
+
+Create one environment for Python, Node.js, backend dependencies, and `boto3`:
+
+```bash
+cd repo-agent
+conda env create -f environment.yml
+conda activate repo-agent
+```
+
+To synchronize an existing environment after dependency changes:
+
+```bash
+conda env update -f environment.yml --prune
+conda activate repo-agent
+```
+
+Complete the one-time local setup:
+
+```bash
+cd repo-agent
+cp backend/.env.example backend/.env
+# Edit backend/.env for your AWS profile and region.
+
+cd frontend
+npm install
+cd ..
+```
+
+AWS CLI v2 is a separate host prerequisite for SSO. Verify it with
+`aws --version`; do not store AWS access keys in the Conda environment.
+
+---
+
+## 3. Run backend and Angular UI together
+
+With the `repo-agent` Conda environment active:
+
+```bash
+cd repo-agent
+./run-dev.sh
+```
+
+Open **http://localhost:4200**. The launcher starts the backend on port 8080 and
+Angular on port 4200. Press `Ctrl+C` once to stop both.
+
+To debug the processes independently, use two terminals:
+
+```bash
+# Terminal 1
+conda activate repo-agent
+cd repo-agent/backend
+./run.sh
+```
+
+```bash
+# Terminal 2
+conda activate repo-agent
+cd repo-agent/frontend
+npm start
+```
+
+---
+
+## 4. Run only the backend (+ local preview)
 
 ```bash
 cd repo-agent/backend
@@ -50,7 +114,7 @@ curl http://127.0.0.1:8080/api/health
 
 ---
 
-## 3. Run against real AWS Bedrock
+## 5. Run against real AWS Bedrock
 
 Use an **IAM Identity Center (SSO) token-provider profile** (refreshable), not
 static keys:
@@ -76,7 +140,7 @@ failing the run**.
 
 ---
 
-## 4. Run the Angular frontend
+## 6. Run the Angular frontend
 
 ```bash
 cd repo-agent/frontend
@@ -96,7 +160,7 @@ npm run build    # → dist/repo-agent (static assets for any CDN/host)
 
 ---
 
-## 5. Tests
+## 7. Tests
 
 **Backend (pytest):**
 
@@ -124,7 +188,7 @@ the Angular dev server instead of the preview.
 
 ---
 
-## 6. Configuration
+## 8. Configuration
 
 All settings are environment variables with the `REPO_AGENT_` prefix (see
 `backend/app/config.py`). The important ones:
@@ -132,7 +196,7 @@ All settings are environment variables with the `REPO_AGENT_` prefix (see
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `REPO_AGENT_LLM_PROVIDER` | `fake` | `fake` or `bedrock` |
-| `REPO_AGENT_DATABASE_PATH` | `./repo_agent.db` | SQLite file location |
+| `REPO_AGENT_DATABASE_PATH` | `./data/repo_agent.db` | Zero-setup embedded state file; parent folder is created automatically |
 | `REPO_AGENT_AWS_PROFILE` | `` | AWS SSO profile for Bedrock |
 | `REPO_AGENT_AWS_REGION` | `us-east-1` | AWS region |
 | `REPO_AGENT_BEDROCK_MODEL_ID` | Claude 3.5 Sonnet | Bedrock model id |
@@ -146,7 +210,7 @@ All settings are environment variables with the `REPO_AGENT_` prefix (see
 
 ---
 
-## 7. Troubleshooting
+## 9. Troubleshooting
 
 | Symptom | Cause / fix |
 |---------|-------------|

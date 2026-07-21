@@ -11,6 +11,7 @@ from __future__ import annotations
 import sqlite3
 import threading
 from functools import lru_cache
+from pathlib import Path
 from typing import Any, Iterable
 
 from app.config import settings
@@ -107,6 +108,9 @@ CREATE TABLE IF NOT EXISTS validation_results (
 
 class Database:
     def __init__(self, path: str) -> None:
+        # Local persistence is zero-setup: create its folder on first start.
+        # Tests can still point this class at their own temporary database path.
+        Path(path).expanduser().parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL;")
