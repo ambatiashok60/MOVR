@@ -1,0 +1,73 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --bg-0: #08090b;
+  --bg-1: #0e0f12;
+  --bg-2: #141518;
+  --bg-3: #1a1b1f;
+  --bg-hover: #1e2024;
+
+  /* Hairlines */
+  --line-1: #1c1e22;
+  --line-2: #26282d;
+  --line-3: #33363c;
+
+  /* Text */
+  --text-1: #e8eaed;
+  --text-2: #9da1a8;
+  --text-3: #62666e;
+
+  /* Accent (Linear indigo) */
+  --accent: #5e6ad2;
+  --accent-hover: #6f7ae0;
+  --accent-soft: rgba(94, 106, 210, 0.14);
+  --accent-text: #c9cdf4;
+
+  /* Semantics */
+  --ok: #4cb782;
+  --ok-soft: rgba(76, 183, 130, 0.12);
+  --danger: #eb5757;
+  --danger-soft: rgba(235, 87, 87, 0.12);
+  --warn: #d9a23c;
+
+  /* Shape & depth */
+  --radius-s: 6px;
+  --radius-m: 8px;
+  --radius-l: 12px;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --ring: 0 0 0 2px rgba(94, 106, 210, 0.35);
+
+  --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+
+  font-family: var(--font-ui);
+  font-size: 13px;
+  background: var(--bg-0);
+  color: var(--text-1);
+  font-feature-settings: 'cv05', 'cv09', 'ss01';
+  -webkit-font-smoothing: antialiased;
+}
+
+* { box-sizing: border-box; }
+
+body { margin: 0; min-width: 0; background: var(--bg-0); }
+
+button, input, textarea, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+
+::selection { background: rgba(94, 106, 210, 0.35); }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 8px; background: var(--line-3) padding-box; }
+::-webkit-scrollbar-thumb:hover { background: #43464d padding-box; }
+::-webkit-scrollbar-track { background: transparent; }
+
+kbd {
+  display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 4px;
+  border: 1px solid var(--line-3); border-bottom-width: 2px; border-radius: 4px;
+  background: var(--bg-3); color: var(--text-2); font: 500 10px var(--font-ui);
+}
