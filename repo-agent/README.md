@@ -61,6 +61,10 @@ python3 -m pip install -r requirements.txt   # fastapi, uvicorn, pydantic, pytes
 ./run.sh                                      # http://127.0.0.1:8080
 ```
 
+`backend/run.sh` guarantees the `repo-agent` Conda environment is used. It runs
+directly when that environment is active, or delegates to `conda run -n
+repo-agent` when it is not.
+
 Open **http://127.0.0.1:8080/preview/**. Enter a workspace path, pick Ask or
 Agent, and send a request — the plan, tool calls, streamed response, relevant
 files, progress counters, and validation all populate live.

@@ -93,8 +93,12 @@ python3 -m pip install -r requirements.txt
 ./run.sh                       # → http://127.0.0.1:8080
 ```
 
-`run.sh` is just `uvicorn app.main:app --host 127.0.0.1 --port 8080`. Any extra
-args pass through (e.g. `./run.sh --reload` for autoreload during development).
+`run.sh` starts `uvicorn app.main:app --host 127.0.0.1 --port 8080`. Any extra
+arguments pass through (e.g. `./run.sh --reload` for autoreload during
+development). It uses the active `repo-agent` Conda environment. If it is not
+active, the script launches through `conda run -n repo-agent`; it will not
+silently use an unrelated system Python. Override the environment name only when
+needed with `REPO_AGENT_CONDA_ENV=another-name`.
 
 Then open **http://127.0.0.1:8080/preview/**:
 
