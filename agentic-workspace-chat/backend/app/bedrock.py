@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
 from botocore.exceptions import BotoCoreError, ClientError, ProfileNotFound
+from botocore.config import Config as BotoConfig
 from fastapi import HTTPException
 
 from .agent_context import to_converse_history, unfinished_plan
@@ -40,7 +41,14 @@ class Bedrock:
                 )
             else:
                 session = boto3.Session(profile_name=self.config.aws_profile, region_name=self.config.aws_region)
-            return session.client("bedrock-runtime")
+            return session.client(
+                "bedrock-runtime",
+                config=BotoConfig(
+                    connect_timeout=self.config.bedrock_connect_timeout_seconds,
+                    read_timeout=self.config.bedrock_read_timeout_seconds,
+                    retries={"max_attempts": 2, "mode": "standard"},
+                ),
+            )
         except ProfileNotFound as error:
             raise HTTPException(503, f"AWS profile '{self.config.aws_profile}' was not found") from error
 

@@ -39,6 +39,7 @@ export class AppComponent implements OnInit {
   plan: { step: string; status: string }[] = [];
   relationships: { path: string; line: number; text: string; relation: string }[] = [];
   runtime?: RuntimeConfig;
+  backendStatus: 'checking' | 'connected' | 'unavailable' = 'checking';
   responseDetail: 'auto' | 'brief' | 'detailed' = 'auto';
   agentMode: 'debug' | 'analyze' | 'migrate' | 'refactor' | 'tests' = 'debug';
   sessions: Session[] = [];
@@ -83,7 +84,18 @@ export class AppComponent implements OnInit {
   startResizeSidebar(event: PointerEvent): void { event.preventDefault(); this.resizingSidebar = true; }
 
   ngOnInit(): void {
-    this.api.runtimeConfig().subscribe({ next: config => this.runtime = config });
+    this.checkBackend();
+  }
+
+  checkBackend(): void {
+    this.backendStatus = 'checking';
+    this.api.health().pipe(switchMap(() => this.api.runtimeConfig())).subscribe({
+      next: config => { this.runtime = config; this.backendStatus = 'connected'; },
+      error: error => {
+        this.backendStatus = 'unavailable';
+        this.error = this.errorText(error, 'Backend unavailable. Start FastAPI on port 8000 and retry.');
+      },
+    });
   }
 
   connect(): void {
@@ -104,7 +116,7 @@ export class AppComponent implements OnInit {
         this.api.createSession(this.workspace?.path || this.workspacePath).subscribe(session => this.session = session);
         this.api.sessions().subscribe(value => this.sessions = value.sessions.filter(item => item.workspace === this.workspace?.path));
       },
-      error: error => { this.workspaceStatus = 'error'; this.error = error.error?.detail ?? 'Could not open this workspace.'; },
+      error: error => { this.workspaceStatus = 'error'; this.error = this.errorText(error, 'Could not open this workspace.'); },
     });
   }
 
@@ -177,7 +189,10 @@ export class AppComponent implements OnInit {
     this.busy = true;
     this.error = '';
     this.failedPrompt = '';
-    this.chatSubscription = this.api.chat(this.workspace.path, scopedPrompt, [...this.selected], this.responseDetail, this.session?.id).pipe(
+    this.chatSubscription = this.api.chat(
+      this.workspace.path, scopedPrompt, [...this.selected], this.responseDetail,
+      this.session?.id, this.runtime?.limits.requestTimeoutSeconds,
+    ).pipe(
       finalize(() => this.busy = false),
     ).subscribe({
       next: response => {
@@ -193,7 +208,7 @@ export class AppComponent implements OnInit {
         response.proposal?.changes.forEach(change => this.acceptedHunks[change.path] = new Set((change.hunks ?? []).map(hunk => hunk.id)));
         this.activeDiff = 0;
       },
-      error: error => { this.failedPrompt = text; this.prompt = text; this.error = error.error?.detail ?? 'The agent could not complete that request.'; },
+      error: error => { this.failedPrompt = text; this.prompt = text; this.error = this.errorText(error, 'The agent could not complete that request.'); },
     });
   }
 
@@ -221,7 +236,7 @@ export class AppComponent implements OnInit {
         this.accepted.clear();
         if (this.workspace) this.api.files(this.workspace.path).subscribe(value => this.files = value.files);
       },
-      error: error => this.error = error.error?.detail ?? 'Could not apply the approved changes.',
+      error: error => this.error = this.errorText(error, 'Could not apply the approved changes.'),
     });
   }
 
@@ -242,7 +257,7 @@ export class AppComponent implements OnInit {
           this.messages.push({ role: 'assistant', text: `Installed the reviewed tool “${result.installed}”. It is available to future agent runs.` });
         }
       },
-      error: error => this.error = error.error?.detail ?? 'The proposed tool could not be approved.',
+      error: error => this.error = this.errorText(error, 'The proposed tool could not be approved.'),
     });
   }
 
@@ -250,7 +265,12 @@ export class AppComponent implements OnInit {
     this.actions = this.actions.filter(item => item.id !== action.id);
   }
 
-  stop(): void { this.chatSubscription?.unsubscribe(); this.busy = false; }
+  stop(): void {
+    this.chatSubscription?.unsubscribe();
+    this.chatSubscription = undefined;
+    this.busy = false;
+    this.error = 'Generation stopped. The backend is cancelling at the next safe boundary.';
+  }
   retry(): void { if (this.failedPrompt) this.send(); }
 
   toggleSessions(): void {
@@ -268,5 +288,14 @@ export class AppComponent implements OnInit {
         this.messages.push({ role, text, html: role === 'assistant' ? this.markdown(text) : undefined, contextFiles: item.contextFiles });
       }
     });
+  }
+
+  private errorText(error: any, fallback: string): string {
+    if (error?.name === 'TimeoutError') return `${fallback} The request reached its time limit and was cancelled.`;
+    if (error?.status === 0) {
+      this.backendStatus = 'unavailable';
+      return 'Cannot reach the backend at http://localhost:8000. Start it and retry.';
+    }
+    return error?.error?.detail ?? fallback;
   }
 }
