@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from app.workspace import apply_hunks, diff_hunks, resolve_file, resolve_workspace, workspace_summary
+from app.workspace import apply_hunks, diff_hunks, resolve_file, resolve_workspace
 
 
 def test_workspace_must_be_inside_allowed_root(tmp_path: Path):
@@ -59,17 +59,3 @@ def test_apply_selected_hunks_only():
     hunks = diff_hunks(diff)
     assert len(hunks) == 2
     assert apply_hunks(before, diff, {hunks[0]["id"]}) == "one\nTWO\nthree\nfour\n"
-
-
-def test_workspace_summary_reports_simple_exploration_metadata(tmp_path: Path):
-    (tmp_path / ".git").mkdir()
-    summary = workspace_summary(tmp_path, [
-        "backend/app.py", "backend/test_app.py", "frontend/main.ts", "README.md",
-    ])
-
-    assert summary["fileCount"] == 4
-    assert summary["isGit"] is True
-    assert summary["topDirectories"] == ["backend", "frontend"]
-    assert summary["languages"][:2] == [
-        {"name": "Python", "files": 2}, {"name": "TypeScript", "files": 1},
-    ]

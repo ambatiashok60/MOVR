@@ -47,6 +47,40 @@ class SessionStore:
             except json.JSONDecodeError: pass
         return result
 
+    def save_execution(self, session_id: str, state: dict) -> None:
+        if not (self.root / session_id).is_dir():
+            return
+        self._write(session_id, "execution.json", {**state, "updatedAt": self._now()})
+
+    def execution(self, session_id: str) -> dict:
+        path = self.root / session_id / "execution.json"
+        if not path.exists():
+            return {"status": "idle", "plan": []}
+        try:
+            return json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            return {"status": "unknown", "plan": []}
+
+    def compact(self, session_id: str, keep: int = 6) -> dict:
+        messages = self.messages(session_id)
+        if len(messages) <= keep:
+            return {"compacted": 0, "remaining": len(messages)}
+        older, recent = messages[:-keep], messages[-keep:]
+        summary = "\n".join(
+            f"- {item.get('role', 'unknown')}: {' '.join(str(item.get('content', '')).split())[:240]}"
+            for item in older[-20:]
+        )
+        compacted = [
+            {"role": "user", "content": "<conversation_summary>\n" + summary + "\n</conversation_summary>", "timestamp": self._now()},
+            {"role": "assistant", "content": "Earlier decisions were compacted; I will preserve them while continuing.", "timestamp": self._now()},
+            *recent,
+        ]
+        directory = self.root / session_id
+        archive = directory / f"messages.precompact-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.jsonl"
+        archive.write_text("\n".join(json.dumps(item) for item in messages) + "\n")
+        self._write(session_id, "messages.jsonl", "\n".join(json.dumps(item) for item in compacted) + "\n")
+        return {"compacted": len(older), "remaining": len(compacted)}
+
     def _write(self, session_id: str, name: str, value: object) -> None:
         directory = self.root / session_id
         directory.mkdir(parents=True, exist_ok=True)

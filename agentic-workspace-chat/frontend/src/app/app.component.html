@@ -63,10 +63,17 @@
         </div>
         <div class="message" *ngFor="let message of messages.slice(1)" [class.user]="message.role === 'user'">
           <span class="avatar">{{ message.role === 'user' ? 'Y' : 'A' }}</span>
-          <div *ngIf="message.role === 'assistant'; else userMessage" [innerHTML]="message.html"></div>
+          <div *ngIf="message.role === 'assistant'; else userMessage" class="assistant-response">
+            <div [class.streaming-response]="message.streaming" [innerHTML]="message.html"></div>
+            <small class="token-usage" *ngIf="message.usage && !message.streaming">
+              Input {{ message.usage.inputTokens | number }} · Output {{ message.usage.outputTokens | number }} · Total {{ message.usage.totalTokens | number }}
+              <span *ngIf="message.sessionTokens"> · Session usage {{ message.sessionTokens | number }}</span>
+              <b *ngIf="(message.sessionTokens || 0) >= 100000">Consider compacting</b>
+            </small>
+          </div>
           <ng-template #userMessage><div>{{ message.text }}<div class="message-context" *ngIf="message.contextFiles?.length"><span *ngFor="let file of message.contextFiles">⌁ {{ file }}</span></div></div></ng-template>
         </div>
-        <div class="thinking" *ngIf="busy && workspace"><i></i><i></i><i></i> Working through your workspace <button (click)="stop()">Stop</button></div>
+        <div class="thinking" *ngIf="busy && workspace"><i></i><i></i><i></i> {{ presenting ? 'Presenting response' : 'Working through your workspace' }} <button (click)="stop()">Stop</button></div>
         <div class="tool-trace" *ngIf="toolEvents.length">
           <span *ngFor="let event of toolEvents">{{ event.status === 'success' ? '✓' : '!' }} {{ event.tool }}</span>
         </div>
@@ -86,21 +93,22 @@
     </section>
 
     <aside class="review context-panel">
-      <div class="review-head"><div><span class="eyebrow">REPOSITORY</span><strong>Exploration context</strong></div><span class="count">{{ repositorySummary?.fileCount || 0 }}</span></div>
+      <div class="review-head"><div><span class="eyebrow">REPOSITORY</span><strong>Exploration context</strong></div><span class="count">{{ files.length }}</span></div>
       <div class="context-scroll">
         <section class="context-card">
           <h3>Overview</h3>
-          <div class="metric"><span>Repository</span><b>{{ repositorySummary?.isGit ? 'Git' : workspace ? 'Folder' : '—' }}</b></div>
-          <div class="metric"><span>Files indexed</span><b>{{ repositorySummary?.fileCount || 0 }}</b></div>
-          <div class="language-list" *ngIf="repositorySummary?.languages?.length">
-            <span *ngFor="let language of repositorySummary?.languages">{{ language.name }} <b>{{ language.files }}</b></span>
-          </div>
+          <div class="metric"><span>Repository</span><b>{{ workspace?.isGit ? 'Git' : workspace ? 'Folder' : '—' }}</b></div>
+          <div class="metric"><span>Files available</span><b>{{ files.length }}</b></div>
+          <div class="metric"><span>Repository index</span><b>{{ indexStatus || 'Validated on use' }}</b></div>
+          <button (click)="refreshIndex()" [disabled]="!workspace || busy">Refresh index</button>
         </section>
 
         <section class="context-card">
           <h3>Execution Plan <em>{{ planProgress() }}</em></h3>
           <div class="context-empty" *ngIf="!plan.length">No active plan.</div>
           <div class="plan-step" *ngFor="let item of plan"><span [class]="item.status">{{ item.status === 'completed' ? '✓' : item.status === 'in_progress' ? '●' : '○' }}</span>{{ item.step }}</div>
+          <button *ngIf="checkpointRequired && !busy" (click)="approvePlan()">Approve plan &amp; continue</button>
+          <button *ngIf="!busy && lifecycleStatus === 'completed' && (workflow === 'architecture comparison' || workflow === 'repository analysis')" (click)="analyzeDeeper()">Analyze deeper</button>
         </section>
 
         <section class="context-card">
@@ -111,6 +119,14 @@
 
         <section class="context-card">
           <h3>Progress</h3>
+          <div class="metric"><span>Workflow</span><b>{{ workflow || '—' }}</b></div>
+          <div class="metric"><span>Current activity</span><b>{{ currentActivity || '—' }}</b></div>
+          <div class="metric"><span>Elapsed</span><b>{{ elapsedSeconds }}s</b></div>
+          <div class="metric"><span>Live tokens</span><b>{{ liveUsage.totalTokens | number }}</b></div>
+          <div class="metric"><span>Context estimate</span><b>{{ contextEstimate | number }}</b></div>
+          <div class="metric"><span>Repository context</span><b>{{ repositoryContextTokens | number }}</b></div>
+          <div class="context-empty" *ngIf="compactionNotice">{{ compactionNotice }}</div>
+          <button *ngIf="session && !busy" (click)="compactConversation()">Compact conversation</button>
           <div class="metric"><span>Files in context</span><b>{{ selected.size }}</b></div>
           <div class="metric"><span>Tool actions</span><b>{{ toolEvents.length }}</b></div>
           <div class="metric"><span>Proposed files</span><b>{{ proposal?.changes?.length || 0 }}</b></div>

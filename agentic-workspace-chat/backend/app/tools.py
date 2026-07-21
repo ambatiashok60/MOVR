@@ -1,13 +1,17 @@
 from dataclasses import dataclass, field
+import logging
 from pathlib import Path
 import subprocess
+from time import monotonic
 from fastapi import HTTPException
 
 from .config import Settings
 from .custom_runtime import CustomToolStore, ToolProposal, execute_code
 from .models import FileChange
 from .workspace import files, read_text, resolve_file, sha
-from .repository_index import build_index
+from .repository_index import analyze_impact, build_index
+
+logger = logging.getLogger("agentic-workspace-chat.tools")
 
 
 def spec(name: str, description: str, properties: dict, required: list[str]) -> dict:
@@ -31,6 +35,9 @@ TOOL_CONFIG = {"tools": [
         "query": {"type": "string", "description": "Optional symbol, path, route, or keyword filter"},
         "path": {"type": "string", "description": "Optional path prefix"},
     }, []),
+    spec("impact_analysis", "Trace a backend contract, API route, symbol, error, or feature to ranked dependent files before proposing coordinated changes.", {
+        "query": {"type": "string", "description": "API path, response field, symbol, error, or feature name"},
+    }, ["query"]),
     spec("read_file", "Read an exact line range from a text file.", {
         "path": {"type": "string"}, "start_line": {"type": "integer", "minimum": 1},
         "end_line": {"type": "integer", "minimum": 1},
@@ -81,6 +88,7 @@ class ToolRunner:
     plan: list[dict] = field(default_factory=list)
     relationships: list[dict] = field(default_factory=list)
     command_runs: int = 0
+    progress: object = field(default=lambda _event: None, repr=False)
 
     def tool_config(self) -> dict:
         tools = list(TOOL_CONFIG["tools"])
@@ -107,14 +115,20 @@ class ToolRunner:
         return self.originals[path]
 
     def execute(self, name: str, data: dict) -> dict:
+        started = monotonic()
+        self.progress({"type": "tool", "tool": name, "status": "started"})
         try:
             method = getattr(self, f"tool_{name}", None)
             result = method(**data) if method else self._execute_installed(name, data)
             self.events.append({"tool": name, "input": data, "status": "success"})
+            logger.info("Tool complete tool=%s status=success elapsed_ms=%s", name, round((monotonic() - started) * 1000))
+            self.progress({"type": "tool", "tool": name, "status": "success", "elapsedMs": round((monotonic() - started) * 1000)})
             return result
         except (HTTPException, OSError, UnicodeError, ValueError) as error:
             detail = error.detail if isinstance(error, HTTPException) else str(error)
             self.events.append({"tool": name, "input": data, "status": "error", "error": str(error), "feedback": "Retry with corrected arguments or inspect more context before falling back."})
+            logger.warning("Tool complete tool=%s status=error elapsed_ms=%s error_type=%s", name, round((monotonic() - started) * 1000), type(error).__name__)
+            self.progress({"type": "tool", "tool": name, "status": "error", "elapsedMs": round((monotonic() - started) * 1000)})
             return {"error": detail}
 
     def tool_list_files(self, query: str = "") -> dict:
@@ -145,7 +159,8 @@ class ToolRunner:
         return {"query": query, "evidence": self.relationships, "truncated": result["truncated"]}
 
     def tool_dependency_graph(self, query: str = "", path: str = "") -> dict:
-        graph = build_index(self.root, self.config.workspace_max_files)
+        state_dir = getattr(self.config, "agent_state_dir", self.root / ".agent-state")
+        graph = build_index(self.root, self.config.workspace_max_files, state_dir / "indexes")
         if path:
             graph["nodes"] = [n for n in graph["nodes"] if n.get("path", "").startswith(path)]
             graph["edges"] = [e for e in graph["edges"] if e.get("from", "").startswith(path)]
@@ -157,6 +172,19 @@ class ToolRunner:
             graph["evidence"] = [e for e in graph["evidence"] if q in str(e).lower()]
         self.relationships = graph["evidence"]
         return {"query": query, "graph": graph, "summary": f"{len(graph['nodes'])} nodes, {len(graph['edges'])} edges, {len(graph['evidence'])} evidence records"}
+
+    def tool_impact_analysis(self, query: str) -> dict:
+        if not query.strip():
+            raise ValueError("Impact analysis requires a non-empty query")
+        state_dir = getattr(self.config, "agent_state_dir", self.root / ".agent-state")
+        graph = build_index(self.root, self.config.workspace_max_files, state_dir / "indexes")
+        result = analyze_impact(graph, query)
+        affected = {item["path"] for item in result["affectedFiles"]}
+        self.relationships = [
+            item for item in graph["evidence"]
+            if item.get("source") in affected and query.lower() in str(item).lower()
+        ][:200]
+        return result
 
     def tool_read_file(self, path: str, start_line: int = 1, end_line: int = 400) -> dict:
         lines = self._content(path).splitlines()
@@ -205,6 +233,7 @@ class ToolRunner:
         if len(steps) > 20 or any(not item.get("step") or item.get("status") not in allowed for item in steps):
             raise ValueError("Plan must have at most 20 valid steps")
         self.plan = steps
+        self.progress({"type": "plan", "plan": steps})
         return {"planUpdated": True, "stepCount": len(steps)}
 
     def tool_validate_overlay(self) -> dict:

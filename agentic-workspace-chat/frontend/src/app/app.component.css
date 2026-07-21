@@ -132,6 +132,10 @@
   color: var(--text-2); background: var(--bg-3); border: 1px solid var(--line-2); font-size: 10px; font-weight: 600;
 }
 .message.user .avatar { color: #fff; background: var(--accent); border: 0; }
+.streaming-response::after { content: '▋'; margin-left: 3px; color: var(--accent); animation: pulse 0.8s steps(2) infinite; }
+.assistant-response { min-width: 0; }
+.token-usage { display: block; margin-top: 7px; color: var(--text-3); font: 10px var(--font-mono); }
+.token-usage b { margin-left: 7px; padding: 2px 5px; border-radius: 4px; color: #9a6700; background: #fff4ce; font-weight: 600; }
 .message-context { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
 .message-context span { padding: 2px 7px; border-radius: 999px; color: var(--accent-text); background: var(--accent-soft); font: 10px var(--font-mono); }
 

@@ -208,7 +208,8 @@ Ensure its resolved path is underneath one of the comma-separated paths in
 
 ### Bedrock reports an authentication error
 
-Refresh the cached profile:
+By default the backend launches this command in its own terminal and retries
+with a fresh session automatically. To diagnose the AWS CLI manually, run:
 
 ```bash
 aws sso login --profile your-sso-profile

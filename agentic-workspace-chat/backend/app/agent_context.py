@@ -43,3 +43,29 @@ def unfinished_plan(plan: list[dict] | None) -> list[dict]:
     if any(step.get("status") in {"pending", "in_progress"} for step in steps):
         return steps
     return []
+
+
+def compacted_history(messages: list[dict], limit: int, max_chars: int) -> tuple[list[dict], dict]:
+    """Bound history and preserve a compact trace of older decisions when needed."""
+    eligible = [m for m in messages if m.get("role") in {"user", "assistant"} and (m.get("content") or "").strip()]
+    raw_chars = sum(len(str(item.get("content", ""))) for item in eligible)
+    if len(eligible) <= limit and raw_chars <= max_chars:
+        history = to_converse_history(eligible, limit, max_chars)
+        return history, {"compacted": False, "estimatedTokens": sum(len(str(item)) for item in history) // 4}
+    recent_count = max(2, limit - 2)
+    older, recent = eligible[:-recent_count], eligible[-recent_count:]
+    summary_lines = []
+    for item in older[-12:]:
+        content = " ".join(str(item.get("content", "")).split())[:240]
+        summary_lines.append(f"- {item['role']}: {content}")
+    summary = "<conversation_summary>\nEarlier decisions and findings:\n" + "\n".join(summary_lines) + "\n</conversation_summary>"
+    synthesized = [
+        {"role": "user", "content": summary},
+        {"role": "assistant", "content": "I will preserve these earlier decisions while continuing."},
+        *recent,
+    ]
+    history = to_converse_history(synthesized, limit, max_chars)
+    return history, {
+        "compacted": True, "messagesCompacted": len(older),
+        "estimatedTokens": sum(len(str(item)) for item in history) // 4,
+    }

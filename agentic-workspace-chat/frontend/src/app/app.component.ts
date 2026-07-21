@@ -4,9 +4,9 @@ import { FormsModule } from '@angular/forms';
 import { finalize, Subscription, switchMap } from 'rxjs';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
-import { ActionProposal, ApiService, Proposal, RepositorySummary, RuntimeConfig, Session, Workspace } from './api.service';
+import { ActionProposal, AgentResponse, ApiService, Proposal, RuntimeConfig, Session, TokenUsage, Workspace } from './api.service';
 
-interface Message { role: 'user' | 'assistant'; text: string; html?: string; contextFiles?: string[]; }
+interface Message { role: 'user' | 'assistant'; text: string; html?: string; contextFiles?: string[]; streaming?: boolean; usage?: TokenUsage; sessionTokens?: number; }
 interface TreeNode { name: string; path: string; directory: boolean; depth: number; expanded: boolean; }
 type LifecycleStatus = 'idle' | 'exploring' | 'working' | 'completed' | 'failed' | 'stopped';
 
@@ -21,12 +21,12 @@ export class AppComponent implements OnInit {
   workspacePath = '';
   workspace?: Workspace;
   files: string[] = [];
-  repositorySummary?: RepositorySummary;
   tree: TreeNode[] = [];
   fileQuery = '';
   selected = new Set<string>();
   prompt = '';
   busy = false;
+  presenting = false;
   lifecycleStatus: LifecycleStatus = 'idle';
   workspaceStatus: 'disconnected' | 'validating' | 'loading' | 'connected' | 'error' = 'disconnected';
   chatSubscription?: Subscription;
@@ -38,6 +38,15 @@ export class AppComponent implements OnInit {
   acceptedHunks: Record<string, Set<string>> = {};
   activeDiff = 0;
   toolEvents: { tool: string; status: string }[] = [];
+  currentActivity = '';
+  elapsedSeconds = 0;
+  workflow = '';
+  checkpointRequired = false;
+  indexStatus = '';
+  liveUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+  contextEstimate = 0;
+  repositoryContextTokens = 0;
+  compactionNotice = '';
   actions: ActionProposal[] = [];
   plan: { step: string; status: string }[] = [];
   relationships: { path: string; line: number; text: string; relation: string }[] = [];
@@ -117,7 +126,7 @@ export class AppComponent implements OnInit {
       finalize(() => this.busy = false),
     ).subscribe({
       next: result => {
-        this.files = result.files; this.repositorySummary = result.summary;
+        this.files = result.files;
         this.tree = this.buildTree(result.files); this.workspaceStatus = 'connected';
         this.lifecycleStatus = 'idle';
         this.api.createSession(this.workspace?.path || this.workspacePath).subscribe(session => this.session = session);
@@ -145,6 +154,33 @@ export class AppComponent implements OnInit {
   }
 
   removeSelected(file: string): void { this.selected.delete(file); }
+
+  refreshIndex(): void {
+    if (!this.workspace || this.busy) return;
+    this.indexStatus = 'Refreshing…';
+    this.api.refreshIndex(this.workspace.path).subscribe({
+      next: result => this.indexStatus = `${result.indexed} symbols · ${result.changed} refreshed`,
+      error: error => this.indexStatus = this.errorText(error, 'Index refresh failed'),
+    });
+  }
+
+  approvePlan(): void {
+    this.checkpointRequired = false;
+    this.prompt = '[Plan approved] Continue the approved architecture migration plan phase by phase. Prepare the next reviewed changes and validation.';
+    this.send();
+  }
+
+  analyzeDeeper(): void {
+    this.prompt = 'Analyze this architecture comparison deeper. Expand only unresolved dimensions and preserve the evidence and decisions already established.';
+    this.send();
+  }
+
+  compactConversation(): void {
+    if (!this.session || this.busy) return;
+    this.api.compactSession(this.session.id).subscribe(result => {
+      this.compactionNotice = result.compacted ? `${result.compacted} messages compacted; ${result.remaining} retained` : 'Conversation is already compact';
+    });
+  }
 
   handleComposerKeydown(event: KeyboardEvent): void {
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -216,33 +252,72 @@ export class AppComponent implements OnInit {
     this.lifecycleStatus = 'working';
     this.error = '';
     this.failedPrompt = '';
-    this.plan = [
-      { step: 'Understand the request', status: 'completed' },
-      { step: 'Explore repository context', status: 'in_progress' },
-      { step: 'Answer or prepare reviewed changes', status: 'pending' },
-    ];
-    this.chatSubscription = this.api.chat(
+    this.plan = [];
+    this.currentActivity = 'Classifying request';
+    this.elapsedSeconds = 0;
+    this.liveUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+    const responseMessage: Message = { role: 'assistant', text: '', html: '', streaming: true };
+    this.messages.push(responseMessage);
+    this.presenting = true;
+    this.chatSubscription = this.api.chatStream(
       this.workspace.path, scopedPrompt, [...this.selected], this.responseDetail,
       this.session?.id, this.runtime?.limits.requestTimeoutSeconds,
-    ).pipe(
-      finalize(() => this.busy = false),
     ).subscribe({
-      next: response => {
-        this.messages.push({ role: 'assistant', text: response.message, html: this.markdown(response.message) });
-        setTimeout(() => { const element = this.messageScroll?.nativeElement; if (element) element.scrollTop = element.scrollHeight; });
-        this.toolEvents = response.events;
-        this.plan = response.plan.length ? response.plan : this.plan.map(step => ({ ...step, status: 'completed' }));
-        this.relationships = response.relationships ?? [];
-        this.actions = response.actions;
-        this.proposal = response.proposal ?? undefined;
-        this.accepted = new Set(response.proposal?.changes.map(change => change.path) ?? []);
-        this.acceptedHunks = {};
-        response.proposal?.changes.forEach(change => this.acceptedHunks[change.path] = new Set((change.hunks ?? []).map(hunk => hunk.id)));
-        this.activeDiff = 0;
-        this.lifecycleStatus = 'completed';
+      next: event => {
+        if (event.workflow) this.workflow = event.workflow.replaceAll('_', ' ');
+        if (event.type === 'started') this.checkpointRequired = event.requiresCheckpoint ?? false;
+        if (event.plan) this.plan = event.plan;
+        if (event.type === 'heartbeat') this.elapsedSeconds = event.elapsedSeconds ?? this.elapsedSeconds;
+        if (event.type === 'activity') this.currentActivity = `${event.activity === 'model' ? 'Thinking' : event.activity} ${event.status ?? ''}`.trim();
+        if (event.type === 'tool' && event.tool) {
+          this.currentActivity = event.status === 'started' ? `Running ${event.tool}` : `Completed ${event.tool}`;
+          if (event.status !== 'started') this.toolEvents.push({ tool: event.tool, status: event.status ?? 'success' });
+        }
+        if (event.type === 'usage' && event.usage) this.liveUsage = event.usage;
+        if (event.type === 'context') {
+          this.contextEstimate = event.estimatedTokens ?? 0;
+          this.repositoryContextTokens = event.repositoryContextTokens ?? 0;
+          this.compactionNotice = event.compacted ? `${event.messagesCompacted ?? 0} older messages compacted` : '';
+        }
+        if (event.type === 'text' && event.text) {
+          responseMessage.text += event.text;
+          responseMessage.html = this.markdown(responseMessage.text);
+          setTimeout(() => { const element = this.messageScroll?.nativeElement; if (element) element.scrollTop = element.scrollHeight; });
+        }
+        if (event.type === 'completed' && event.result) this.completeStream(responseMessage, event.result);
+        if (event.type === 'error') {
+          responseMessage.streaming = false; this.presenting = false; this.busy = false;
+          this.lifecycleStatus = 'failed'; this.failedPrompt = text; this.prompt = text;
+          this.error = event.message || 'The agent could not complete that request.';
+        }
       },
-      error: error => { this.lifecycleStatus = 'failed'; this.failedPrompt = text; this.prompt = text; this.error = this.errorText(error, 'The agent could not complete that request.'); },
+      error: error => {
+        responseMessage.streaming = false; this.presenting = false; this.busy = false;
+        this.lifecycleStatus = 'failed'; this.failedPrompt = text; this.prompt = text;
+        this.error = this.errorText(error, error?.message || 'The agent could not complete that request.');
+      },
     });
+  }
+
+  private completeStream(message: Message, response: AgentResponse): void {
+    if (!message.text) { message.text = response.message; message.html = this.markdown(response.message); }
+    const priorTokens = this.messages.reduce((sum, item) => sum + (item === message ? 0 : item.usage?.totalTokens ?? 0), 0);
+    message.usage = response.usage;
+    message.sessionTokens = priorTokens + response.usage.totalTokens;
+    message.streaming = false;
+    this.presenting = false;
+    this.busy = false;
+    this.currentActivity = 'Complete';
+    this.toolEvents = response.events.filter(event => event.tool !== 'model_round');
+    this.plan = response.plan.length ? response.plan : this.plan.map(step => ({ ...step, status: 'completed' }));
+    this.relationships = response.relationships ?? [];
+    this.actions = response.actions;
+    this.proposal = response.proposal ?? undefined;
+    this.accepted = new Set(response.proposal?.changes.map(change => change.path) ?? []);
+    this.acceptedHunks = {};
+    response.proposal?.changes.forEach(change => this.acceptedHunks[change.path] = new Set((change.hunks ?? []).map(hunk => hunk.id)));
+    this.activeDiff = 0;
+    this.lifecycleStatus = 'completed';
   }
 
   toggleChange(path: string): void {
@@ -301,6 +376,7 @@ export class AppComponent implements OnInit {
   stop(): void {
     this.chatSubscription?.unsubscribe();
     this.chatSubscription = undefined;
+    this.presenting = false;
     this.busy = false;
     this.lifecycleStatus = 'stopped';
     this.error = 'Generation stopped. The backend is cancelling at the next safe boundary.';
@@ -316,11 +392,20 @@ export class AppComponent implements OnInit {
     this.stop(); this.session = session; this.sessionsOpen = false;
     this.api.sessionMessages(session.id).subscribe(result => {
       this.messages = [{ role: 'assistant', text: `Session restored · ${new Date(session.updatedAt).toLocaleString()}` }];
+      let sessionTokens = 0;
       for (const item of result.messages) {
         const role = item.role === 'user' ? 'user' : 'assistant';
         const text = item.content || item.text || '';
-        this.messages.push({ role, text, html: role === 'assistant' ? this.markdown(text) : undefined, contextFiles: item.contextFiles });
+        sessionTokens += item.usage?.totalTokens ?? 0;
+        this.messages.push({ role, text, html: role === 'assistant' ? this.markdown(text) : undefined, contextFiles: item.contextFiles, usage: item.usage, sessionTokens: role === 'assistant' ? sessionTokens : undefined });
       }
+    });
+    this.api.sessionExecution(session.id).subscribe(state => {
+      this.plan = state.plan ?? [];
+      this.workflow = state.workflow?.replaceAll('_', ' ') ?? '';
+      this.currentActivity = state.activity ?? state.status;
+      if (state.usage) this.liveUsage = state.usage;
+      this.lifecycleStatus = state.status === 'completed' ? 'completed' : state.status === 'failed' ? 'failed' : 'idle';
     });
   }
 

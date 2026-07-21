@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     aws_access_key_id: str | None = None
     aws_secret_access_key: str | None = None
     aws_session_token: str | None = None
+    aws_sso_auto_login: bool = True
+    aws_sso_login_timeout_seconds: int = 180
     bedrock_model_id: str = "anthropic.claude-sonnet-4-5-20250929-v1:0"
     bedrock_max_tokens: int = 8192
     bedrock_connect_timeout_seconds: int = 10
@@ -52,7 +54,9 @@ class Settings(BaseSettings):
     # isolation. Empty keeps localhost development backwards compatible.
     api_auth_token: str = ""
     max_request_bytes: int = 2_000_000
-    request_timeout_seconds: int = 300
+    request_timeout_seconds: int = 900
+    log_level: str = "INFO"
+    backend_log_dir: Path = Path(__file__).resolve().parents[1] / "logs"
 
     @field_validator("workspace_allowed_roots", mode="before")
     @classmethod

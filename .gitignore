@@ -55,6 +55,7 @@ combined-preview-*/
 
 # Runtime and temporary files
 .agent-state/
+logs/
 *.log
 *.tmp
 *.temp

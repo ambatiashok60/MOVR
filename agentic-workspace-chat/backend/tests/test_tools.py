@@ -52,6 +52,22 @@ def test_dependency_graph_contains_imports_symbols_and_evidence(tmp_path: Path):
     assert any(item["relation"] == "route:/items" for item in graph["evidence"])
 
 
+def test_impact_analysis_connects_backend_route_to_frontend_consumer(tmp_path: Path):
+    backend = tmp_path / "backend"
+    frontend = tmp_path / "frontend"
+    backend.mkdir(); frontend.mkdir()
+    (backend / "api.py").write_text("@app.get('/api/scenarios')\ndef scenarios():\n    return []\n")
+    (frontend / "scenario.service.ts").write_text(
+        "export const load = () => http.get('/api/scenarios');\n"
+    )
+
+    result = runner(tmp_path).execute("impact_analysis", {"query": "scenarios"})
+    affected = {item["path"] for item in result["affectedFiles"]}
+
+    assert "backend/api.py" in affected
+    assert "frontend/scenario.service.ts" in affected
+
+
 def test_validate_overlay_reports_empty_content(tmp_path: Path):
     tools = runner(tmp_path)
     tools.execute("create_file", {"path": "empty.py", "content": ""})

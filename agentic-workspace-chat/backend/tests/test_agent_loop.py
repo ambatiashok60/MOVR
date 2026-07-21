@@ -3,7 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.agent_context import to_converse_history, unfinished_plan
+from app.agent_context import compacted_history, to_converse_history, unfinished_plan
+from app.workflows import classify_request
 from app.tools import ToolRunner
 
 
@@ -65,6 +66,30 @@ def test_unfinished_plan_resumes_only_open_work():
     assert unfinished_plan(open_plan) == open_plan
     assert unfinished_plan([{"step": "one", "status": "completed"}]) == []
     assert unfinished_plan(None) == []
+
+
+def test_long_history_compacts_and_preserves_recent_turns():
+    source = [{"role": "user" if i % 2 == 0 else "assistant", "content": f"message-{i} " + "x" * 200} for i in range(14)]
+    history, info = compacted_history(source, limit=8, max_chars=4_000)
+    assert info["compacted"] is True
+    assert info["messagesCompacted"] > 0
+    assert "message-13" in str(history[-1])
+
+
+def test_workflow_classifier_uses_bounded_specialized_flows():
+    assert classify_request("hello").name == "simple"
+    assert classify_request("Here is a traceback and error; fix dependent files").name == "diagnosis"
+    comparison = classify_request("Compare the functional TC architecture with API scenario architecture")
+    assert comparison.name == "architecture_comparison"
+    assert comparison.max_steps == 8
+    migration = classify_request("Replace this architecture to follow the other architecture")
+    assert migration.name == "architecture_migration"
+    assert migration.requires_checkpoint is True
+    cross_layer = classify_request(
+        "Based on the backend response change, update the frontend card and show a dialog when scenarios are empty"
+    )
+    assert cross_layer.name == "cross_layer_change"
+    assert "frontend consumers" in cross_layer.plan[1]["step"].lower()
 
 
 def _runner(tmp_path: Path, max_runs: int = 2) -> ToolRunner:

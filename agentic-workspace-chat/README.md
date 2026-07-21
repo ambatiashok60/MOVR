@@ -66,7 +66,7 @@ CUSTOM_TOOL_TIMEOUT_SECONDS=5
 FRONTEND_ORIGIN=http://localhost:4200
 API_AUTH_TOKEN=
 MAX_REQUEST_BYTES=2000000
-REQUEST_TIMEOUT_SECONDS=300
+REQUEST_TIMEOUT_SECONDS=900
 ```
 
 For a trusted loopback-only setup, leave `API_AUTH_TOKEN` empty. If the API is
@@ -77,7 +77,12 @@ configured, never the token. Requests larger than `MAX_REQUEST_BYTES` are
 rejected before JSON parsing. Every response includes an `X-Request-ID` for
 support and audit correlation.
 
-For SSO mode, set `AWS_PROFILE` and authenticate with the AWS CLI. For static
+For SSO mode, set `AWS_PROFILE`. The backend verifies the cached session before
+the first Bedrock request. When it is missing or expired, it runs `aws sso
+login --profile <profile>` as a subprocess whose output appears in the backend
+terminal, waits for login to finish, then creates a fresh AWS session. Set
+`AWS_SSO_AUTO_LOGIN=false` only when that interactive behavior is undesirable.
+For static
 key mode, set `AWS_AUTH_MODE=keys`, then provide `AWS_ACCESS_KEY_ID` and
 `AWS_SECRET_ACCESS_KEY` (plus `AWS_SESSION_TOKEN` when using temporary keys).
 The frontend never receives these values. Prefer SSO or short-lived role
@@ -91,7 +96,7 @@ If the SSO session is already valid, no new login is needed. Verify it with:
 aws sts get-caller-identity --profile your-existing-sso-profile
 ```
 
-If it is expired:
+You can still refresh it manually when diagnosing AWS CLI configuration:
 
 ```bash
 aws sso login --profile your-existing-sso-profile
@@ -106,6 +111,14 @@ source .venv/bin/activate
 pip install -e '.[dev]'
 uvicorn app.main:app --reload --port 8000
 ```
+
+The backend terminal prints correlated lifecycle logs for HTTP requests, file
+indexing, AWS session establishment, Bedrock rounds, tool calls, ten-second
+heartbeats, cancellation, deadlines, and completion timings. Set
+`LOG_LEVEL=DEBUG` in `.env` for future debug-level diagnostics. Logs omit prompt
+text, file contents, credentials, and tokens. The same records are stored by
+local date in `backend/logs/backend-YYYY-MM-DD.txt`; set `BACKEND_LOG_DIR` to
+an absolute directory to change that ignored runtime location.
 
 Verify `http://localhost:8000/api/health`.
 
@@ -138,7 +151,7 @@ Open `http://localhost:4200`.
   backend is connected. A failed check has a visible Retry action.
 - Workspace validation is bounded to 15 seconds and file discovery to 30 seconds
   in the browser, so a stalled backend does not leave the screen permanently busy.
-- Agent requests use `REQUEST_TIMEOUT_SECONDS` (300 seconds by default). The UI
+- Agent requests use `REQUEST_TIMEOUT_SECONDS` (900 seconds by default). The UI
   allows a small transport margin and then restores the prompt with a retryable
   error instead of remaining frozen.
 - Stop/unsubscribe closes the browser request. The backend detects disconnect,
@@ -327,6 +340,10 @@ The backend should fail with a clear remediation message when the SSO session is
 missing or expired, asking the developer to refresh it with the AWS CLI.
 
 ## Current Agent Loop
+
+See [Seamless agent experience](docs/SEAMLESS_AGENT_EXPERIENCE.md) for the live
+streaming protocol, bounded workflows, cache freshness, compaction, recovery,
+and latency behavior.
 
 One user request can now produce multiple Bedrock Converse calls. Claude Sonnet
 4.5 can list workspace files, search text, read bounded line ranges, and create
