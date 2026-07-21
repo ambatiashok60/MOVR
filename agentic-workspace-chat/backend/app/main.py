@@ -12,6 +12,7 @@ from .config import model_display_name, settings
 from .custom_runtime import CustomToolStore, ToolProposal
 from .session_store import SessionStore
 from .models import ActionRequest, ApplyRequest, ChatRequest, CommandRequest, ProposalRequest, WorkspaceRequest
+from .resilience import wait_for_agent
 from .tools import ToolRunner, run_safe_command
 from .workspace import apply_change, apply_hunks, diff_for, diff_hunks, files, read_text, resolve_file, resolve_workspace, sha
 
@@ -82,7 +83,8 @@ def runtime_config():
         "model": {"id": config.bedrock_model_id, "displayName": model_display_name(config.bedrock_model_id)},
         "region": config.aws_region,
         "authRequired": bool(config.api_auth_token),
-        "limits": {"maxRequestBytes": config.max_request_bytes, "maxMessageChars": 50_000},
+        "limits": {"maxRequestBytes": config.max_request_bytes, "maxMessageChars": 50_000,
+                   "requestTimeoutSeconds": config.request_timeout_seconds},
         "features": {"streaming": False, "toolCalling": True, "reviewedEdits": True, "customTools": True},
     }
 
@@ -120,13 +122,11 @@ async def chat(request: ChatRequest, http_request: Request):
     task = asyncio.create_task(asyncio.to_thread(
         Bedrock(config).run, root, request.message, context, request.detail, cancel_event, history, prior_plan
     ))
-    while not task.done():
-        if await http_request.is_disconnected():
-            cancel_event.set()
-            await task
-            return {"message": "Generation stopped.", "proposal": None, "events": [{"tool": "cancel", "status": "success"}], "actions": [], "relationships": []}
-        await asyncio.sleep(0.1)
-    result = await task
+    result = await wait_for_agent(task, cancel_event, http_request, config.request_timeout_seconds)
+    if result is None:
+        return {"message": "Generation stopped.", "proposal": None,
+                "events": [{"tool": "cancel", "status": "success"}],
+                "actions": [], "plan": [], "relationships": []}
     if request.session_id:
         sessions.append(request.session_id, {"role": "assistant", "content": result.message, "plan": result.plan})
     proposal = None

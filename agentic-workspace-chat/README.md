@@ -5,6 +5,8 @@ Detailed design and delivery tracking:
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md)
 - [`docs/CONDA_SETUP.md`](docs/CONDA_SETUP.md) — isolated local setup and tests
+- [`docs/RUNTIME_LIFECYCLE.md`](docs/RUNTIME_LIFECYCLE.md) — connectivity,
+  request deadlines, cancellation, and freeze diagnosis
 
 ## Installation
 
@@ -127,6 +129,25 @@ Open `http://localhost:4200`.
 5. Keep or reject files, then apply only the accepted changes.
 6. If the agent proposes a one-run or reusable custom tool, inspect its code and
    scope before approving it.
+
+### Expected runtime behavior
+
+- The UI checks `/api/health` and `/api/config` at startup and shows whether the
+  backend is connected. A failed check has a visible Retry action.
+- Workspace validation is bounded to 15 seconds and file discovery to 30 seconds
+  in the browser, so a stalled backend does not leave the screen permanently busy.
+- Agent requests use `REQUEST_TIMEOUT_SECONDS` (300 seconds by default). The UI
+  allows a small transport margin and then restores the prompt with a retryable
+  error instead of remaining frozen.
+- Stop/unsubscribe closes the browser request. The backend detects disconnect,
+  signals the agent cancellation event, and returns immediately rather than
+  waiting indefinitely for an in-flight Bedrock call.
+- Bedrock connection and read deadlines are independently bounded by
+  `BEDROCK_CONNECT_TIMEOUT_SECONDS` and `BEDROCK_READ_TIMEOUT_SECONDS`.
+
+The current chat transport is one bounded HTTP request, not token streaming.
+Tool events, plans, and the response appear when the request completes. SSE is a
+future enhancement; the UI must never imply that a silent request is unbounded.
 
 ### Custom tool security model
 

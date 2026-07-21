@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     aws_session_token: str | None = None
     bedrock_model_id: str = "anthropic.claude-sonnet-4-5-20250929-v1:0"
     bedrock_max_tokens: int = 8192
+    bedrock_connect_timeout_seconds: int = 10
+    bedrock_read_timeout_seconds: int = 120
     workspace_allowed_roots: Annotated[list[Path], NoDecode]
     workspace_max_files: int = 10_000
     workspace_max_file_bytes: int = 1_048_576
