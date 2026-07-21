@@ -3,6 +3,7 @@ import { Injectable } from '@angular/core';
 import { Observable, timeout } from 'rxjs';
 
 export interface Workspace { path: string; name: string; isGit: boolean; }
+export interface RepositorySummary { fileCount: number; isGit: boolean; languages: { name: string; files: number }[]; topDirectories: string[]; }
 export interface RuntimeConfig { provider: string; model: { id: string; displayName: string }; region: string; limits: { requestTimeoutSeconds: number }; features: { streaming: boolean; toolCalling: boolean; reviewedEdits: boolean; customTools: boolean }; }
 export interface Health { status: string; region: string; model: string; }
 export interface Session { id: string; workspace: string | null; createdAt: string; updatedAt: string; }
@@ -27,7 +28,7 @@ export class ApiService {
   }
 
   files(path: string) {
-    return this.bounded(this.http.post<{ files: string[] }>('/api/workspaces/files', { path }), 30);
+    return this.bounded(this.http.post<{ files: string[]; summary: RepositorySummary }>('/api/workspaces/files', { path }), 30);
   }
 
   runtimeConfig() {

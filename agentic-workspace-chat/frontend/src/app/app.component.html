@@ -42,7 +42,14 @@
 
     <section class="chat">
       <div class="messages" #messageScroll>
-        <div class="agent-plan" *ngIf="plan.length"><div class="eyebrow">AGENT PLAN <em>{{ planProgress() }}</em></div><div class="plan-step" *ngFor="let item of plan"><span [class]="item.status">{{ item.status === 'completed' ? '✓' : item.status === 'in_progress' ? '●' : '○' }}</span>{{ item.step }}</div></div>
+        <div class="lifecycle" *ngIf="lifecycleStatus !== 'idle'">
+          <ng-container *ngFor="let stage of ['Understand', 'Explore', 'Plan', 'Complete']; let index = index">
+            <div class="lifecycle-stage" [class.done]="index < lifecycleReached()" [class.active]="index === lifecycleReached() && busy">
+              <span>{{ index < lifecycleReached() ? '✓' : index + 1 }}</span><small>{{ stage }}</small>
+            </div>
+            <i *ngIf="index < 3"></i>
+          </ng-container>
+        </div>
         <div class="agent-plan relationship-map" *ngIf="relationships.length"><div class="eyebrow">EVIDENCE MAP</div><div class="relationship" *ngFor="let item of relationships"><code>{{item.path}}:{{item.line}}</code><span>{{item.text}}</span></div></div>
         <div class="welcome" *ngIf="messages.length === 1">
           <div class="orb"><span></span></div>
@@ -78,36 +85,68 @@
       <p class="footnote">Changes are always shown as a diff before they touch your files.</p>
     </section>
 
-    <aside class="review">
-      <div class="review-head"><div><span class="eyebrow">REVIEW</span><strong>Proposed changes</strong></div><span class="count">{{ proposal?.changes?.length || 0 }}</span></div>
-      <div class="review-empty" *ngIf="!proposal && !actions.length">
-        <div class="diff-art"><span class="minus">−</span><span class="plus">＋</span></div>
-        <h3>No changes yet</h3>
-        <p>When Arc proposes edits, review every file and hunk here before applying.</p>
-      </div>
-      <div class="action-proposals" *ngIf="actions.length && !proposal">
-        <article *ngFor="let action of actions">
-          <div class="action-title"><span>{{ action.persistent ? 'Reusable tool' : 'One-run tool' }}</span><strong>{{ action.name }}</strong></div>
-          <p>{{ action.description }}</p>
-          <small *ngIf="action.inputPaths.length">Scope: {{ action.inputPaths.join(', ') }}</small>
-          <pre>{{ action.code }}</pre>
-          <div><button (click)="rejectAction(action)">Reject</button><button class="approve" (click)="approveAction(action)">Review approved</button></div>
-        </article>
-      </div>
-      <div class="change-review" *ngIf="proposal">
-        <div class="change-tabs">
-          <button *ngFor="let change of proposal.changes; let index = index" (click)="activeDiff=index" [class.active]="activeDiff===index">
-            <input type="checkbox" [checked]="accepted.has(change.path)" (click)="$event.stopPropagation()" (change)="toggleChange(change.path)">
-            <span class="op" [class]="change.operation">{{ change.operation[0].toUpperCase() }}</span>
-            <span>{{ change.path }}</span>
-          </button>
-        </div>
-        <div class="hunk-list" *ngIf="proposal.changes[activeDiff].hunks?.length"><label *ngFor="let hunk of proposal.changes[activeDiff].hunks"><input type="checkbox" [checked]="acceptedHunks[proposal.changes[activeDiff].path].has(hunk.id)" (change)="toggleHunk(proposal.changes[activeDiff].path, hunk.id)"><code>{{hunk.header}}</code></label></div>
-        <pre class="diff"><span *ngFor="let line of diffLines(proposal.changes[activeDiff].diff)" [class]="'diff-line ' + line.kind">{{ line.text }}</span></pre>
-        <div class="review-actions">
-          <button class="discard" (click)="proposal=undefined; accepted.clear()">Discard</button>
-          <button class="apply" (click)="applyChanges()" [disabled]="!accepted.size || busy">Keep {{ accepted.size }} & apply</button>
-        </div>
+    <aside class="review context-panel">
+      <div class="review-head"><div><span class="eyebrow">REPOSITORY</span><strong>Exploration context</strong></div><span class="count">{{ repositorySummary?.fileCount || 0 }}</span></div>
+      <div class="context-scroll">
+        <section class="context-card">
+          <h3>Overview</h3>
+          <div class="metric"><span>Repository</span><b>{{ repositorySummary?.isGit ? 'Git' : workspace ? 'Folder' : '—' }}</b></div>
+          <div class="metric"><span>Files indexed</span><b>{{ repositorySummary?.fileCount || 0 }}</b></div>
+          <div class="language-list" *ngIf="repositorySummary?.languages?.length">
+            <span *ngFor="let language of repositorySummary?.languages">{{ language.name }} <b>{{ language.files }}</b></span>
+          </div>
+        </section>
+
+        <section class="context-card">
+          <h3>Execution Plan <em>{{ planProgress() }}</em></h3>
+          <div class="context-empty" *ngIf="!plan.length">No active plan.</div>
+          <div class="plan-step" *ngFor="let item of plan"><span [class]="item.status">{{ item.status === 'completed' ? '✓' : item.status === 'in_progress' ? '●' : '○' }}</span>{{ item.step }}</div>
+        </section>
+
+        <section class="context-card">
+          <h3>Relevant Files <em>{{ relevantFiles().length }}</em></h3>
+          <div class="context-empty" *ngIf="!relevantFiles().length">Select files or ask the agent to explore.</div>
+          <div class="relevant-file" *ngFor="let file of relevantFiles()">▱ <span>{{ file }}</span></div>
+        </section>
+
+        <section class="context-card">
+          <h3>Progress</h3>
+          <div class="metric"><span>Files in context</span><b>{{ selected.size }}</b></div>
+          <div class="metric"><span>Tool actions</span><b>{{ toolEvents.length }}</b></div>
+          <div class="metric"><span>Proposed files</span><b>{{ proposal?.changes?.length || 0 }}</b></div>
+        </section>
+
+        <section class="context-card">
+          <h3>Validation</h3>
+          <div class="context-empty" *ngIf="!validationEvents().length">No validation run yet.</div>
+          <div class="activity" *ngFor="let event of validationEvents()"><span [class.pass]="event.status === 'success'">{{ event.status === 'success' ? '✓' : '!' }}</span>{{ event.tool }}</div>
+        </section>
+
+        <section class="context-card" *ngIf="toolEvents.length">
+          <h3>Latest Actions</h3>
+          <div class="activity" *ngFor="let event of toolEvents.slice(-6).reverse()"><span [class.pass]="event.status === 'success'">{{ event.status === 'success' ? '✓' : '!' }}</span>{{ event.tool }}</div>
+        </section>
+
+        <section class="context-card review-card" *ngIf="proposal || actions.length">
+          <h3>Review Changes <em>{{ proposal?.changes?.length || actions.length }}</em></h3>
+          <div class="action-proposals" *ngIf="actions.length && !proposal">
+            <article *ngFor="let action of actions">
+              <div class="action-title"><span>{{ action.persistent ? 'Reusable tool' : 'One-run tool' }}</span><strong>{{ action.name }}</strong></div>
+              <p>{{ action.description }}</p>
+              <div><button (click)="rejectAction(action)">Reject</button><button class="approve" (click)="approveAction(action)">Approve</button></div>
+            </article>
+          </div>
+          <div class="change-review" *ngIf="proposal">
+            <div class="change-tabs">
+              <button *ngFor="let change of proposal.changes; let index = index" (click)="activeDiff=index" [class.active]="activeDiff===index">
+                <input type="checkbox" [checked]="accepted.has(change.path)" (click)="$event.stopPropagation()" (change)="toggleChange(change.path)">
+                <span class="op" [class]="change.operation">{{ change.operation[0].toUpperCase() }}</span><span>{{ change.path }}</span>
+              </button>
+            </div>
+            <pre class="diff"><span *ngFor="let line of diffLines(proposal.changes[activeDiff].diff)" [class]="'diff-line ' + line.kind">{{ line.text }}</span></pre>
+            <div class="review-actions"><button class="discard" (click)="proposal=undefined; accepted.clear()">Discard</button><button class="apply" (click)="applyChanges()" [disabled]="!accepted.size || busy">Apply {{ accepted.size }}</button></div>
+          </div>
+        </section>
       </div>
       <div class="review-footer"><span class="shield">◇</span><div><strong>You stay in control</strong><small>Nothing is written without approval.</small></div></div>
     </aside>

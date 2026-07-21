@@ -7,6 +7,8 @@ Detailed design and delivery tracking:
 - [`docs/CONDA_SETUP.md`](docs/CONDA_SETUP.md) — isolated local setup and tests
 - [`docs/RUNTIME_LIFECYCLE.md`](docs/RUNTIME_LIFECYCLE.md) — connectivity,
   request deadlines, cancellation, and freeze diagnosis
+- [`docs/REPOSITORY_EXPLORATION_UX.md`](docs/REPOSITORY_EXPLORATION_UX.md) —
+  RepoAgent-inspired three-pane exploration, planner, evidence, and review flow
 
 ## Installation
 

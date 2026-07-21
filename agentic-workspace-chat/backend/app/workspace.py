@@ -17,6 +17,13 @@ BINARY_EXTENSIONS = {
     ".db", ".sqlite", ".pyc", ".dll", ".so", ".dylib", ".class", ".jar", ".exe", ".bin",
 }
 
+LANGUAGES = {
+    ".py": "Python", ".ts": "TypeScript", ".tsx": "TypeScript", ".js": "JavaScript",
+    ".jsx": "JavaScript", ".java": "Java", ".kt": "Kotlin", ".go": "Go",
+    ".rs": "Rust", ".cs": "C#", ".rb": "Ruby", ".php": "PHP", ".swift": "Swift",
+    ".html": "HTML", ".css": "CSS", ".scss": "SCSS", ".sql": "SQL",
+}
+
 
 def is_binary(path: Path) -> bool:
     if path.suffix.lower() in BINARY_EXTENSIONS:
@@ -55,6 +62,30 @@ def files(root: Path, limit: int) -> list[str]:
             if len(result) >= limit:
                 break
     return sorted(result)
+
+
+def workspace_summary(root: Path, paths: list[str]) -> dict:
+    """Return deterministic, inexpensive exploration metadata for the UI."""
+    language_counts: dict[str, int] = {}
+    top_directories: set[str] = set()
+    for relative in paths:
+        path = Path(relative)
+        language = LANGUAGES.get(path.suffix.lower())
+        if language:
+            language_counts[language] = language_counts.get(language, 0) + 1
+        if len(path.parts) > 1:
+            top_directories.add(path.parts[0])
+
+    languages = [
+        {"name": name, "files": count}
+        for name, count in sorted(language_counts.items(), key=lambda item: (-item[1], item[0]))[:6]
+    ]
+    return {
+        "fileCount": len(paths),
+        "isGit": (root / ".git").exists(),
+        "languages": languages,
+        "topDirectories": sorted(top_directories)[:8],
+    }
 
 
 def read_text(root: Path, relative: str, max_bytes: int) -> str:

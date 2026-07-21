@@ -4,10 +4,11 @@ import { FormsModule } from '@angular/forms';
 import { finalize, Subscription, switchMap } from 'rxjs';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
-import { ActionProposal, ApiService, Proposal, RuntimeConfig, Session, Workspace } from './api.service';
+import { ActionProposal, ApiService, Proposal, RepositorySummary, RuntimeConfig, Session, Workspace } from './api.service';
 
 interface Message { role: 'user' | 'assistant'; text: string; html?: string; contextFiles?: string[]; }
 interface TreeNode { name: string; path: string; directory: boolean; depth: number; expanded: boolean; }
+type LifecycleStatus = 'idle' | 'exploring' | 'working' | 'completed' | 'failed' | 'stopped';
 
 @Component({
   selector: 'app-root',
@@ -20,11 +21,13 @@ export class AppComponent implements OnInit {
   workspacePath = '';
   workspace?: Workspace;
   files: string[] = [];
+  repositorySummary?: RepositorySummary;
   tree: TreeNode[] = [];
   fileQuery = '';
   selected = new Set<string>();
   prompt = '';
   busy = false;
+  lifecycleStatus: LifecycleStatus = 'idle';
   workspaceStatus: 'disconnected' | 'validating' | 'loading' | 'connected' | 'error' = 'disconnected';
   chatSubscription?: Subscription;
   failedPrompt = '';
@@ -66,6 +69,7 @@ export class AppComponent implements OnInit {
     this.plan = [];
     this.relationships = [];
     this.toolEvents = [];
+    this.lifecycleStatus = 'idle';
     this.error = '';
     this.failedPrompt = '';
     if (this.workspace) this.api.createSession(this.workspace.path).subscribe(session => this.session = session);
@@ -101,6 +105,7 @@ export class AppComponent implements OnInit {
   connect(): void {
     if (!this.workspacePath.trim()) return;
     this.busy = true;
+    this.lifecycleStatus = 'exploring';
     this.workspaceStatus = 'validating';
     this.error = '';
     this.api.validate(this.workspacePath.trim()).pipe(
@@ -112,11 +117,13 @@ export class AppComponent implements OnInit {
       finalize(() => this.busy = false),
     ).subscribe({
       next: result => {
-        this.files = result.files; this.tree = this.buildTree(result.files); this.workspaceStatus = 'connected';
+        this.files = result.files; this.repositorySummary = result.summary;
+        this.tree = this.buildTree(result.files); this.workspaceStatus = 'connected';
+        this.lifecycleStatus = 'idle';
         this.api.createSession(this.workspace?.path || this.workspacePath).subscribe(session => this.session = session);
         this.api.sessions().subscribe(value => this.sessions = value.sessions.filter(item => item.workspace === this.workspace?.path));
       },
-      error: error => { this.workspaceStatus = 'error'; this.error = this.errorText(error, 'Could not open this workspace.'); },
+      error: error => { this.workspaceStatus = 'error'; this.lifecycleStatus = 'failed'; this.error = this.errorText(error, 'Could not open this workspace.'); },
     });
   }
 
@@ -166,6 +173,25 @@ export class AppComponent implements OnInit {
     return `${done}/${this.plan.length}`;
   }
 
+  relevantFiles(): string[] {
+    return [...new Set([
+      ...this.selected,
+      ...this.relationships.map(item => item.path),
+      ...(this.proposal?.changes.map(change => change.path) ?? []),
+    ])].slice(0, 12);
+  }
+
+  validationEvents(): { tool: string; status: string }[] {
+    return this.toolEvents.filter(event => /test|command|valid|lint|type/i.test(event.tool));
+  }
+
+  lifecycleReached(): number {
+    if (this.lifecycleStatus === 'completed') return 4;
+    if (this.lifecycleStatus === 'working') return 2;
+    if (this.lifecycleStatus === 'exploring') return 1;
+    return 0;
+  }
+
   private buildTree(paths: string[]): TreeNode[] {
     const result: TreeNode[] = [];
     const folders = new Set<string>();
@@ -187,8 +213,14 @@ export class AppComponent implements OnInit {
     this.messages.push({ role: 'user', text, contextFiles: [...this.selected] });
     this.prompt = '';
     this.busy = true;
+    this.lifecycleStatus = 'working';
     this.error = '';
     this.failedPrompt = '';
+    this.plan = [
+      { step: 'Understand the request', status: 'completed' },
+      { step: 'Explore repository context', status: 'in_progress' },
+      { step: 'Answer or prepare reviewed changes', status: 'pending' },
+    ];
     this.chatSubscription = this.api.chat(
       this.workspace.path, scopedPrompt, [...this.selected], this.responseDetail,
       this.session?.id, this.runtime?.limits.requestTimeoutSeconds,
@@ -199,7 +231,7 @@ export class AppComponent implements OnInit {
         this.messages.push({ role: 'assistant', text: response.message, html: this.markdown(response.message) });
         setTimeout(() => { const element = this.messageScroll?.nativeElement; if (element) element.scrollTop = element.scrollHeight; });
         this.toolEvents = response.events;
-        this.plan = response.plan;
+        this.plan = response.plan.length ? response.plan : this.plan.map(step => ({ ...step, status: 'completed' }));
         this.relationships = response.relationships ?? [];
         this.actions = response.actions;
         this.proposal = response.proposal ?? undefined;
@@ -207,8 +239,9 @@ export class AppComponent implements OnInit {
         this.acceptedHunks = {};
         response.proposal?.changes.forEach(change => this.acceptedHunks[change.path] = new Set((change.hunks ?? []).map(hunk => hunk.id)));
         this.activeDiff = 0;
+        this.lifecycleStatus = 'completed';
       },
-      error: error => { this.failedPrompt = text; this.prompt = text; this.error = this.errorText(error, 'The agent could not complete that request.'); },
+      error: error => { this.lifecycleStatus = 'failed'; this.failedPrompt = text; this.prompt = text; this.error = this.errorText(error, 'The agent could not complete that request.'); },
     });
   }
 
@@ -269,6 +302,7 @@ export class AppComponent implements OnInit {
     this.chatSubscription?.unsubscribe();
     this.chatSubscription = undefined;
     this.busy = false;
+    this.lifecycleStatus = 'stopped';
     this.error = 'Generation stopped. The backend is cancelling at the next safe boundary.';
   }
   retry(): void { if (this.failedPrompt) this.send(); }

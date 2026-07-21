@@ -14,7 +14,7 @@ from .session_store import SessionStore
 from .models import ActionRequest, ApplyRequest, ChatRequest, CommandRequest, ProposalRequest, WorkspaceRequest
 from .resilience import wait_for_agent
 from .tools import ToolRunner, run_safe_command
-from .workspace import apply_change, apply_hunks, diff_for, diff_hunks, files, read_text, resolve_file, resolve_workspace, sha
+from .workspace import apply_change, apply_hunks, diff_for, diff_hunks, files, read_text, resolve_file, resolve_workspace, sha, workspace_summary
 
 logger = logging.getLogger("agentic-workspace-chat")
 
@@ -105,7 +105,8 @@ def run_command(request: CommandRequest):
 @app.post("/api/workspaces/files")
 def list_files(request: WorkspaceRequest):
     root = resolve_workspace(request.path, config)
-    return {"files": files(root, config.workspace_max_files)}
+    discovered = files(root, config.workspace_max_files)
+    return {"files": discovered, "summary": workspace_summary(root, discovered)}
 
 
 @app.post("/api/chat")
