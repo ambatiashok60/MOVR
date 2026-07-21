@@ -1,0 +1,44 @@
+# Local / prod-like run of RepoAgent.
+#   docker compose up --build
+#   frontend → http://localhost:8081   backend → http://localhost:8080
+#
+# Postgres and Redis are included (commented) as the scale-out path documented in
+# docs/DEPLOYMENT.md. The backend uses SQLite + an in-memory event bus today; wire
+# these in once the persistence/event-bus adapters are added.
+
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8080:8080"
+    environment:
+      REPO_AGENT_LLM_PROVIDER: "fake"       # set to "bedrock" + AWS creds for real LLM
+      REPO_AGENT_DATABASE_PATH: "/data/repo_agent.db"
+      REPO_AGENT_CORS_ALLOW_ORIGINS: "http://localhost:8081"
+    volumes:
+      - backend_data:/data
+      - ./:/work:rw                          # sample workspace: use /work as workspace_path
+    # Single replica: the event bus is in-process (see docs/ARCHITECTURE.md §7).
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "8081:80"
+    depends_on:
+      - backend
+
+  # --- scale-out backing services (not yet wired into the app) ---------------
+  # db:
+  #   image: postgres:16-alpine
+  #   environment:
+  #     POSTGRES_DB: repo_agent
+  #     POSTGRES_USER: repo_agent
+  #     POSTGRES_PASSWORD: change-me
+  #   volumes: [pg_data:/var/lib/postgresql/data]
+  #
+  # redis:
+  #   image: redis:7-alpine
+
+volumes:
+  backend_data:
+  # pg_data:

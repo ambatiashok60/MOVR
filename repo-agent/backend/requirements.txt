@@ -1,0 +1,13 @@
+# RepoAgent backend — core runtime dependencies.
+# Everything here is required to run the service with the deterministic FakeLLM.
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+pydantic-settings>=2.3
+
+# Test-only
+pytest>=8.0
+
+# Optional: only needed to talk to real AWS Bedrock. Imported lazily; the
+# service runs and all tests pass without it.
+# boto3>=1.34

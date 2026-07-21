@@ -1,0 +1,95 @@
+<div class="app">
+  <!-- LEFT -->
+  <aside class="sidebar">
+    <ra-conversation-sidebar (newChat)="newChat()"></ra-conversation-sidebar>
+  </aside>
+
+  <!-- CENTER -->
+  <section class="center">
+    <div class="topbar">
+      <div class="ws">Workspace
+        <input [ngModel]="store.state().workspacePath"
+               (ngModelChange)="onWorkspaceInput($event)"
+               placeholder="/path/to/your/repo" />
+      </div>
+      <span class="conn" [class.bad]="store.status() === 'connection_lost' || !connectivity.online()">
+        <span class="pip"></span>
+        {{ store.status() === 'connection_lost' ? 'Reconnecting…' : 'Connected' }}
+      </span>
+      <div class="modes">
+        <button [class.on]="store.state().mode === 'ask'" (click)="setMode('ask')">Ask</button>
+        <button [class.on]="store.state().mode === 'agent'" (click)="setMode('agent')">Agent</button>
+      </div>
+    </div>
+
+    <div class="chat">
+      <div class="banner" *ngIf="store.needsAuth()">
+        AWS session expired. Complete the sign-in in your browser. The run will resume automatically.
+      </div>
+
+      <div class="empty" *ngIf="store.status() === 'idle'">
+        Enter a workspace path and describe what you want to do. Everything streams live below.
+      </div>
+
+      <div class="msg" *ngIf="store.status() !== 'idle'">
+        <div class="who assistant"><span class="av">◇</span> RepoAgent</div>
+        <ra-execution-progress [status]="store.status()"></ra-execution-progress>
+        <ra-response-batch *ngFor="let batch of store.responseBatches()" [batch]="batch"></ra-response-batch>
+      </div>
+    </div>
+
+    <div class="composer">
+      <input [(ngModel)]="message" (keydown.enter)="submit()"
+             placeholder="Ask a question or describe what you want to do…" />
+      <button *ngIf="!store.canCancel()" (click)="submit()" [disabled]="!store.canSubmit()" title="Send">➤</button>
+      <button *ngIf="store.canCancel()" class="stop" (click)="cancel()" title="Stop">■</button>
+    </div>
+  </section>
+
+  <!-- RIGHT -->
+  <aside class="context">
+    <div class="ctx-card">
+      <h3>Execution Plan</h3>
+      <ra-plan-panel [plan]="store.plan()"></ra-plan-panel>
+    </div>
+
+    <div class="ctx-card">
+      <h3>Relevant Files</h3>
+      <div *ngIf="store.relevantFiles().length; else noFiles">
+        <div class="file" *ngFor="let f of store.relevantFiles()"><span class="fi">📄</span>{{ f }}</div>
+      </div>
+      <ng-template #noFiles><div class="empty">—</div></ng-template>
+    </div>
+
+    <div class="ctx-card">
+      <h3>Progress</h3>
+      <div class="metric">Files Read <b>{{ store.state().filesReadCount }}</b></div>
+      <div class="metric">Tool Calls <b>{{ store.state().toolCallCount }}</b></div>
+      <div class="metric">Files Modified <b>{{ store.state().filesModifiedCount }}</b></div>
+    </div>
+
+    <div class="ctx-card">
+      <h3>Validation</h3>
+      <div *ngIf="store.validationResults().length; else noVal">
+        <div class="validation-row" *ngFor="let v of store.validationResults()">
+          <span [class.pass]="v.status === 'passed'" [class.fail]="v.status === 'failed'"
+                [class.skip]="v.status === 'skipped'">
+            {{ v.status === 'passed' ? '✓' : (v.status === 'failed' ? '✕' : '○') }} {{ v.name }}
+          </span>
+        </div>
+      </div>
+      <ng-template #noVal><div class="empty">—</div></ng-template>
+    </div>
+
+    <div class="ctx-card">
+      <h3>Latest Actions</h3>
+      <div *ngIf="store.latestActions().length; else noAct">
+        <div class="action" *ngFor="let a of store.latestActions()">
+          <span>✓ {{ a.label }}</span>
+          <span class="t">{{ a.at | date:'HH:mm:ss' }}</span>
+        </div>
+      </div>
+      <ng-template #noAct><div class="empty">—</div></ng-template>
+    </div>
+  </aside>
+</div>

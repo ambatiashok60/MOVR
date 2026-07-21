@@ -1,0 +1,63 @@
+# OS and editor metadata
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# JavaScript / TypeScript dependencies and caches (at any depth)
+node_modules/
+.pnpm-store/
+.npm/
+.yarn/cache/
+.yarn/unplugged/
+.angular/
+.nx/
+.turbo/
+.vite/
+.parcel-cache/
+.eslintcache
+*.tsbuildinfo
+
+# Python bytecode, environments, and tool caches (at any depth)
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pytype/
+.hypothesis/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+.venv/
+venv/
+env/
+
+# Test and build output
+coverage/
+test-results/
+playwright-report/
+dist/
+build/
+out/
+.cache/
+
+# Runtime and temporary files
+*.log
+*.tmp
+*.temp
+*.pid
+*.db-wal
+*.db-shm
+
+# Local environment files; keep checked-in examples
+.env
+.env.*
+!.env.example
+!.env.*.example

@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RepoAgent</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --border: #e6e8ee; --muted: #8a90a2;
+    --text: #1f2430; --text-soft: #4b5163; --primary: #6c5ce7; --primary-soft: #eeecfb;
+    --green: #16a34a; --green-soft: #e7f6ec; --amber: #d97706; --red: #dc2626;
+    --radius: 12px; --shadow: 0 1px 2px rgba(20,24,40,.05), 0 1px 8px rgba(20,24,40,.04);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.5;
+  }
+  .app { display: grid; grid-template-columns: 240px 1fr 320px; grid-template-rows: 100vh; }
+  /* ---- left ---- */
+  .sidebar { background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+  .brand { display: flex; align-items: center; gap: 10px; padding: 16px 18px; font-weight: 700; font-size: 16px; }
+  .brand .logo { width: 28px; height: 28px; border-radius: 8px; background: linear-gradient(135deg,#7c6ff0,#6c5ce7); display: grid; place-items: center; color: #fff; font-size: 15px; }
+  .conv-head { display: flex; align-items: center; justify-content: space-between; padding: 6px 18px 10px; color: var(--muted); font-size: 12px; }
+  .newchat { border: 1px solid var(--border); background: var(--primary); color: #fff; border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
+  .conv-list { overflow-y: auto; padding: 4px 10px; flex: 1; min-height: 0; }
+  .conv { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border-radius: 8px; cursor: pointer; color: var(--text-soft); }
+  .conv:hover { background: #f7f7fb; }
+  .conv.active { background: var(--primary-soft); color: var(--text); font-weight: 600; }
+  .conv .dot { color: var(--green); }
+  .conv .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .conv .time { font-size: 11px; color: var(--muted); }
+  .sidebar-foot { border-top: 1px solid var(--border); padding: 12px 16px; font-size: 11px; color: var(--muted); }
+  .bar { height: 4px; background: #ece9fb; border-radius: 4px; margin-top: 8px; overflow: hidden; }
+  .bar > span { display: block; height: 100%; width: 100%; background: linear-gradient(90deg,#7c6ff0,#6c5ce7); }
+  /* ---- header ---- */
+  .center { display: flex; flex-direction: column; min-height: 0; }
+  .topbar { display: flex; align-items: center; gap: 16px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  .ws { display: flex; align-items: center; gap: 8px; color: var(--text-soft); font-size: 13px; min-width: 0; }
+  .ws input { border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 12px; width: 340px; max-width: 40vw; color: var(--text); }
+  .conn { display: inline-flex; align-items: center; gap: 6px; color: var(--green); font-size: 12px; font-weight: 600; }
+  .conn .pip { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 3px var(--green-soft); }
+  .conn.bad { color: var(--amber); } .conn.bad .pip { background: var(--amber); box-shadow: 0 0 0 3px #fdecd6; }
+  .modes { margin-left: auto; display: inline-flex; background: #f1f1f6; border-radius: 10px; padding: 3px; }
+  .modes button { border: 0; background: transparent; padding: 6px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; color: var(--muted); cursor: pointer; }
+  .modes button.on { background: var(--primary); color: #fff; }
+  /* ---- chat ---- */
+  .chat { flex: 1; overflow-y: auto; padding: 20px 24px; min-height: 0; }
+  .msg { margin-bottom: 18px; }
+  .who { display: flex; align-items: center; gap: 8px; font-weight: 700; margin-bottom: 6px; }
+  .who .av { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; color: #fff; font-size: 12px; }
+  .who.user .av { background: #6c5ce7; } .who.assistant .av { background: #12b886; }
+  .bubble { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow); }
+  .bubble.user { background: #f7f7fb; }
+  .stages { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin: 8px 0 14px; }
+  .stage { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); min-width: 78px; }
+  .stage .ring { width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--border); display: grid; place-items: center; background: #fff; }
+  .stage.done .ring { background: var(--green); border-color: var(--green); color: #fff; }
+  .stage.active .ring { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .stage .line { }
+  .sep { flex: 1; height: 2px; background: var(--border); min-width: 12px; }
+  .section { border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow); margin-bottom: 12px; overflow: hidden; }
+  .section > h4 { margin: 0; padding: 10px 14px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); border-bottom: 1px solid var(--border); background: #fbfbfd; }
+  .section .body { padding: 12px 14px; }
+  pre { margin: 0; background: #0f1222; color: #e6e6f0; border-radius: 8px; padding: 12px 14px; overflow-x: auto; font-size: 12.5px; }
+  pre.diff .add { color: #7ee787; } pre.diff .del { color: #ff9a9a; }
+  code.inline { background: #f1f1f6; border-radius: 5px; padding: 1px 5px; font-size: 12.5px; }
+  .validation-row { display: inline-flex; align-items: center; gap: 6px; margin-right: 14px; font-size: 13px; }
+  .pass { color: var(--green); font-weight: 600; } .fail { color: var(--red); font-weight: 600; } .skip { color: var(--muted); }
+  /* ---- composer ---- */
+  .composer { border-top: 1px solid var(--border); background: var(--panel); padding: 12px 20px; display: flex; align-items: center; gap: 12px; }
+  .composer input { flex: 1; border: 1px solid var(--border); border-radius: 10px; padding: 11px 14px; font-size: 14px; }
+  .composer button { border: 0; background: var(--primary); color: #fff; width: 42px; height: 42px; border-radius: 50%; font-size: 17px; cursor: pointer; }
+  .composer button:disabled { opacity: .5; cursor: default; }
+  /* ---- right ---- */
+  .context { background: var(--panel); border-left: 1px solid var(--border); overflow-y: auto; padding: 16px; min-height: 0; }
+  .ctx-card { margin-bottom: 18px; }
+  .ctx-card > h3 { font-size: 13px; margin: 0 0 10px; }
+  .plan-step { display: flex; align-items: center; gap: 9px; padding: 5px 0; color: var(--text-soft); font-size: 13px; }
+  .plan-step .mk { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border); display: inline-grid; place-items: center; font-size: 10px; flex: none; }
+  .plan-step.completed .mk { background: var(--green); border-color: var(--green); color: #fff; }
+  .plan-step.in_progress .mk { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .file { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; color: var(--text-soft); }
+  .file .fi { color: var(--muted); }
+  .metric { display: flex; align-items: center; justify-content: space-between; padding: 5px 0; font-size: 13px; color: var(--text-soft); }
+  .metric b { background: #f1f1f6; border-radius: 6px; padding: 2px 10px; color: var(--text); font-variant-numeric: tabular-nums; }
+  .action { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12.5px; padding: 4px 0; color: var(--text-soft); }
+  .action .t { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .banner { background: #fdf4e3; border: 1px solid #f4d9a8; color: #8a5a12; border-radius: 10px; padding: 10px 12px; font-size: 13px; margin-bottom: 12px; display: none; }
+  .empty { color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- LEFT -->
+  <aside class="sidebar">
+    <div class="brand"><span class="logo">◇</span> RepoAgent</div>
+    <div class="conv-head"><span>Conversations</span><button class="newchat" id="newChat">+ New Chat</button></div>
+    <div class="conv-list" id="convList"></div>
+    <div class="sidebar-foot">
+      Conversations compact automatically to keep context optimized.
+      <div class="bar"><span id="ctxBar"></span></div>
+    </div>
+  </aside>
+
+  <!-- CENTER -->
+  <section class="center">
+    <div class="topbar">
+      <div class="ws">Workspace
+        <input id="workspace" placeholder="/path/to/your/repo" />
+      </div>
+      <span class="conn" id="conn"><span class="pip"></span> Connected</span>
+      <div class="modes" id="modes">
+        <button data-mode="ask">Ask</button>
+        <button data-mode="agent" class="on">Agent</button>
+      </div>
+    </div>
+
+    <div class="chat" id="chat">
+      <div class="empty" id="emptyState">Enter a workspace path and describe what you want to do. Everything streams live below.</div>
+    </div>
+
+    <div class="composer">
+      <input id="prompt" placeholder="Ask a question or describe what you want to do…"
+             value="Fix the API scenario generation status update. It is not updating to completed in some cases." />
+      <button id="send" title="Send">➤</button>
+    </div>
+  </section>
+
+  <!-- RIGHT -->
+  <aside class="context" id="context">
+    <div class="ctx-card">
+      <h3>Execution Plan</h3>
+      <div id="planPanel"><div class="empty">No active run.</div></div>
+    </div>
+    <div class="ctx-card">
+      <h3>Relevant Files</h3>
+      <div id="filesPanel"><div class="empty">—</div></div>
+    </div>
+    <div class="ctx-card">
+      <h3>Progress</h3>
+      <div id="progressPanel">
+        <div class="metric">Files Read <b id="mRead">0</b></div>
+        <div class="metric">Tool Calls <b id="mTools">0</b></div>
+        <div class="metric">Files Modified <b id="mMods">0</b></div>
+      </div>
+    </div>
+    <div class="ctx-card">
+      <h3>Validation</h3>
+      <div id="validationPanel"><div class="empty">—</div></div>
+    </div>
+    <div class="ctx-card">
+      <h3>Latest Actions</h3>
+      <div id="actionsPanel"><div class="empty">—</div></div>
+    </div>
+  </aside>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
