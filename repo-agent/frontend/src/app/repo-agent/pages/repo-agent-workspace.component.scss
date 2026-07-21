@@ -36,7 +36,14 @@
 
 .chat { flex: 1; overflow-y: auto; padding: 20px 24px; }
 .banner { background: #fdf4e3; border: 1px solid #f4d9a8; color: #8a5a12; border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; font-size: 13px; }
+.banner.error { background: #fff1f0; border-color: #f4b8b3; color: #9f241b; }
 .empty { color: var(--muted); font-size: 13px; }
+.chat > .empty { max-width: 620px; margin: 12vh auto 0; text-align: center; }
+.chat > .empty h1 { margin: 0 0 8px; color: var(--text); font-size: 28px; }
+.chat > .empty p { margin: 0 auto 20px; max-width: 520px; color: var(--text-soft); }
+.suggestions { display: grid; gap: 8px; max-width: 420px; margin: 0 auto; }
+.suggestions button { border: 1px solid var(--border); background: var(--panel); color: var(--text-soft); border-radius: 10px; padding: 11px 14px; text-align: left; cursor: pointer; box-shadow: var(--shadow); }
+.suggestions button:hover { border-color: var(--primary); color: var(--primary); }
 .msg .who { display: flex; align-items: center; gap: 8px; font-weight: 700; margin-bottom: 8px; }
 .who .av { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; color: #fff; font-size: 12px; background: #12b886; }
 

@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Subscription } from 'rxjs';
@@ -38,6 +38,7 @@ export class RepoAgentWorkspaceComponent implements OnInit, OnDestroy {
   private readonly recovery = inject(RunRecoveryService);
 
   message = 'Fix the API scenario generation status update. It is not updating to completed in some cases.';
+  readonly backendStatus = signal<'checking' | 'connected' | 'unavailable'>('checking');
   private subs: Subscription[] = [];
   private watchdog?: ReturnType<typeof setInterval>;
 
@@ -45,8 +46,12 @@ export class RepoAgentWorkspaceComponent implements OnInit, OnDestroy {
     this.subs.push(
       this.stream.events$.subscribe(({ type, data }) => this.onEvent(type, data)),
     );
-    this.workspaces.health().subscribe((h) => {
-      if (!this.store.state().workspacePath) this.store.setWorkspace(h.default_workspace);
+    this.workspaces.health().subscribe({
+      next: (h) => {
+        this.backendStatus.set('connected');
+        if (!this.store.state().workspacePath) this.store.setWorkspace(h.default_workspace);
+      },
+      error: () => this.backendStatus.set('unavailable'),
     });
     this.attemptRecovery();
     this.watchdog = setInterval(() => this.checkHealth(), 5_000);

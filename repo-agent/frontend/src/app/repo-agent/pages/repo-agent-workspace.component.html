@@ -12,9 +12,11 @@
                (ngModelChange)="onWorkspaceInput($event)"
                placeholder="/path/to/your/repo" />
       </div>
-      <span class="conn" [class.bad]="store.status() === 'connection_lost' || !connectivity.online()">
+      <span class="conn" [class.bad]="store.status() === 'connection_lost' || !connectivity.online() || backendStatus() === 'unavailable'">
         <span class="pip"></span>
-        {{ store.status() === 'connection_lost' ? 'Reconnecting…' : 'Connected' }}
+        {{ backendStatus() === 'checking' ? 'Checking backend…' :
+           backendStatus() === 'unavailable' ? 'Backend unavailable' :
+           store.status() === 'connection_lost' ? 'Reconnecting…' : 'Connected' }}
       </span>
       <div class="modes">
         <button [class.on]="store.state().mode === 'ask'" (click)="setMode('ask')">Ask</button>
@@ -23,12 +25,22 @@
     </div>
 
     <div class="chat">
+      <div class="banner error" *ngIf="backendStatus() === 'unavailable'">
+        The UI is running, but the backend did not answer <code>/api/health</code>.
+        Start <code>repo-agent/backend/run.sh</code> in the Conda environment and refresh.
+      </div>
       <div class="banner" *ngIf="store.needsAuth()">
         AWS session expired. Complete the sign-in in your browser. The run will resume automatically.
       </div>
 
       <div class="empty" *ngIf="store.status() === 'idle'">
-        Enter a workspace path and describe what you want to do. Everything streams live below.
+        <h1>What are we building?</h1>
+        <p>Enter a workspace path, then ask RepoAgent to explore, explain, test, or change the code.</p>
+        <div class="suggestions">
+          <button (click)="message = 'Explain the architecture of this workspace'">Explain this codebase →</button>
+          <button (click)="message = 'Find and fix the most important issue'">Find and fix an issue →</button>
+          <button (click)="message = 'Add meaningful tests for the selected workspace'">Add meaningful tests →</button>
+        </div>
       </div>
 
       <div class="msg" *ngIf="store.status() !== 'idle'">
