@@ -56,13 +56,17 @@ Use an **IAM Identity Center (SSO) token-provider profile** (refreshable), not
 static keys:
 
 ```bash
-export REPO_AGENT_LLM_PROVIDER=bedrock
-export REPO_AGENT_AWS_PROFILE=your-sso-profile
-export REPO_AGENT_AWS_REGION=us-east-1
-export REPO_AGENT_BEDROCK_MODEL_ID=anthropic.claude-3-5-sonnet-20240620-v1:0
+cd repo-agent/backend
+cp .env.example .env
+# Edit .env and replace your-sso-profile with the profile from ~/.aws/config.
 aws sso login --profile your-sso-profile     # once, if the session is expired
 ./run.sh
 ```
+
+The backend loads `backend/.env` automatically because `run.sh` starts from the
+backend directory. Real `.env` files are ignored by Git; `.env.example` is the
+checked-in template. Store the AWS **profile name** here, not access keys or a
+secret access key.
 
 `boto3` is imported lazily and only required when the provider is `bedrock`. If
 the SSO session expires mid-run, the backend automatically resets the session,

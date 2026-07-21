@@ -34,10 +34,9 @@ By default the service uses a deterministic **FakeLLM**, so it runs with **zero
 AWS setup**. To use real Bedrock:
 
 ```bash
-export REPO_AGENT_LLM_PROVIDER=bedrock
-export REPO_AGENT_AWS_PROFILE=your-sso-profile
-export REPO_AGENT_AWS_REGION=us-east-1
-export REPO_AGENT_BEDROCK_MODEL_ID=anthropic.claude-3-5-sonnet-20240620-v1:0
+cd backend
+cp .env.example .env
+# Edit .env and set REPO_AGENT_AWS_PROFILE to your AWS profile name.
 ```
 
 `boto3` is imported lazily and only required when the provider is `bedrock`.
@@ -75,7 +74,8 @@ both frontends follow.
 
 ## Configuration
 
-All tunables are environment-overridable with the `REPO_AGENT_` prefix — see
+All tunables are environment-overridable with the `REPO_AGENT_` prefix and may
+be placed in `backend/.env` — see `backend/.env.example` and
 `backend/app/config.py` (iteration caps, compaction thresholds, batch limits,
 timeouts, heartbeat/stale-run windows, AWS profile/region/model).
 
