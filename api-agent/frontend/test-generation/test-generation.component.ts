@@ -15,8 +15,10 @@ type TestGenerationTab = 'functional' | 'api';
   styleUrl: './test-generation.component.scss',
 })
 export class TestGenerationComponent {
-  @Input() stories: SprintApiStory[] = [];
+  @Input() selectedStory: SprintApiStory | null = null;
   @Input() tenantId: number | string = 1;
+  @Input() repoPath = '';
+  @Input() branch = '';
 
   activeTab: TestGenerationTab = 'functional';
 

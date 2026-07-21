@@ -57,4 +57,9 @@
   &__settings {
     margin-top: auto;
   }
+
+  &__children { list-style: none; margin: .25rem 0 .45rem 2rem; padding: 0 0 0 .6rem; border-left: 1px solid rgba(255,255,255,.12); display: grid; gap: .15rem; }
+  &__child { display: flex; align-items: center; gap: .55rem; padding: .48rem .6rem; border-radius: 7px; color: #94a3b8; text-decoration: none; font-size: .82rem; }
+  &__child:hover { color: #fff; background: rgba(255,255,255,.06); }
+  &__child--active { color: #fff; background: rgba(99,102,241,.26); }
 }

@@ -1,0 +1,84 @@
+<div class="test-gen-page">
+  <header class="page-header">
+    <div class="page-header__titles">
+      <nav class="breadcrumb">
+        <span>Test Gen</span>
+        <i class="pi pi-angle-right"></i>
+        <strong>{{ mode === 'api' ? 'API Tests' : 'Functional Tests' }}</strong>
+      </nav>
+      <p class="page-header__subtitle">
+        {{ mode === 'api' ? 'Generate API integration scenarios and code using repository-native frameworks.' : 'Generate Playwright functional test cases and repository-native code.' }}
+      </p>
+    </div>
+    <div class="page-header__context">
+      <label class="context-chip">
+        <span>Repository:</span>
+        <strong>{{ repository() }}</strong>
+        <i class="pi pi-angle-down"></i>
+      </label>
+      <label class="context-chip">
+        <span>Branch:</span>
+        <strong>{{ branch() }}</strong>
+        <i class="pi pi-angle-down"></i>
+      </label>
+    </div>
+  </header>
+
+  <section class="story-panel">
+    <div class="story-panel__header">
+      <h2>User Story</h2>
+      <div class="story-panel__actions">
+        <button type="button"><i class="pi pi-sparkles"></i> Analyze Story</button>
+        <button type="button"><i class="pi pi-lightbulb"></i> Design Suggestions</button>
+        <button type="button"><i class="pi pi-sitemap"></i> Story Flow</button>
+        <button type="button"><i class="pi pi-refresh"></i> Re-analyze</button>
+      </div>
+    </div>
+    <table class="story-table">
+      <thead>
+        <tr>
+          <th></th>
+          <th>ID</th>
+          <th>Title</th>
+          <th>Status</th>
+          <th>Compliance</th>
+          <th>Type</th>
+          <th>Ambiguity</th>
+          <th>Risk Level</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (story of stories(); track story.user_story_id) {
+          <tr
+            [class.story-table__row--selected]="selectedStory() === story"
+            (click)="selectStory(story)"
+          >
+            <td><input type="checkbox" [checked]="selectedStory() === story" /></td>
+            <td class="story-table__id">{{ story.user_story_id }}</td>
+            <td>{{ story.title }}</td>
+            <td><span class="badge badge--analyzed">{{ story.status || 'Analyzed' }}</span></td>
+            <td><i class="pi pi-check-circle compliance-ok"></i></td>
+            <td>Requirements Gap</td>
+            <td><span class="badge badge--warn">Yes (15%)</span></td>
+            <td><span class="badge badge--normal">Normal</span></td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </section>
+
+  <app-functional-test-gen
+    *ngIf="mode === 'functional'"
+    [selectedStory]="selectedStory()"
+    [tenantId]="1"
+    [repoPath]="repoPath()"
+    [branch]="branch()"
+  />
+  <app-api-test-gen
+    *ngIf="mode === 'api'"
+    [selectedStory]="selectedStory()"
+    [tenantId]="1"
+    [repoPath]="repoPath()"
+    [branch]="branch()"
+  />
+</div>

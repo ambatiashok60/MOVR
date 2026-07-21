@@ -1,0 +1,40 @@
+name: Preview validation
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: ["ai-workspace/**", "api-agent/frontend/**", ".github/workflows/preview-validation.yml"]
+  push:
+    branches: [main, "feature/**", "feature-*", "codex/**"]
+    paths: ["ai-workspace/**", "api-agent/frontend/**", ".github/workflows/preview-validation.yml"]
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: ai-workspace/frontend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm, cache-dependency-path: ai-workspace/frontend/pnpm-lock.yaml }
+      # --no-frozen-lockfile: the dev machine cannot run pnpm to refresh the
+      # lockfile when dependencies change; restore --frozen-lockfile once the
+      # lockfile is regenerated in an environment with pnpm.
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: combined-preview-${{ github.sha }}
+          path: ai-workspace/frontend/dist/ai-workspace-preview/browser
+          if-no-files-found: error
+          retention-days: 14
+  backend:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: ai-workspace/backend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11", cache: pip }
+      - run: pip install -e ".[dev]"
+      - run: python -m compileall -q app
+      - run: pytest -q

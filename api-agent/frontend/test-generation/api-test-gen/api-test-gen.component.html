@@ -1,206 +1,37 @@
 <section class="api-test-gen">
-  <section class="toolbar-band">
-    <label>
-      <span>Repository path</span>
-      <input type="text" [(ngModel)]="repoPath" placeholder="/path/to/local/repo" />
-    </label>
-    <label>
-      <span>Branch</span>
-      <input type="text" [(ngModel)]="branch" placeholder="optional" />
-    </label>
-    <label class="context-input">
-      <span>Additional context</span>
-      <input type="text" [(ngModel)]="additionalContext" placeholder="optional test hints" />
-    </label>
+  <header class="api-test-gen__header">
+    <div><h2>API Scenarios</h2><p>AI-generated API test scenarios based on the selected story, code and dependencies.</p></div>
+    <button type="button" class="primary" [disabled]="!selectedStory || !repoPath || facade.store.isGeneratingScenarios()" (click)="generateScenarios()">
+      {{ facade.store.isGeneratingScenarios() ? 'Generating…' : 'Generate API Scenarios' }}
+    </button>
+  </header>
+
+  <app-api-scenario-table
+    [scenarios]="facade.store.scenarios()"
+    [selectedIds]="facade.store.selectedScenarioIds()"
+    [selectedScenarioId]="facade.store.selectedScenarioId()"
+    [loading]="facade.store.isGeneratingScenarios()"
+    [generatingCodeForId]="facade.store.generatingCodeForId()"
+    (selectionChange)="facade.setSelection($event)"
+    (generateCode)="generateCode($event)"
+    (openScenario)="openScenario($event)"
+    (editScenario)="editScenario($event)"
+    (deleteScenario)="deleteScenario($event)"
+  />
+
+  <p class="error" *ngIf="facade.store.error()">{{ facade.store.error() }}</p>
+  <app-mock-plan-review
+    *ngIf="facade.store.generatedResult()?.mock_stub_plan as plan"
+    [plan]="plan"
+    [approving]="facade.store.generatingCodeForId() !== null"
+    (approve)="facade.approveAndContinue()"
+  />
+  <section class="budget-review" *ngIf="facade.store.generatedResult()?.budget as budget">
+    <strong>Generation estimate</strong>
+    <span>{{ budget.usage.llm_calls }} LLM calls</span>
+    <span>{{ budget.usage.tool_calls }} tool calls</span>
+    <span>{{ budget.usage.repository_reads }} repository reads</span>
+    <span>{{ budget.usage.elapsed_seconds }} seconds</span>
+    <ul *ngIf="budget.review_required"><li *ngFor="let reason of budget.exceeded_thresholds">{{ reason }}</li></ul>
   </section>
-
-  <div class="workspace-grid">
-    <main class="main-column">
-      <section class="section-block">
-        <div class="section-header">
-          <h2>Sprint API Stories</h2>
-          <button type="button" [disabled]="!selectedStory || !repoPath || isGeneratingScenarios" (click)="generateScenarios()">
-            Generate API Scenarios
-          </button>
-        </div>
-
-        <div class="table-shell">
-          <table>
-            <thead>
-              <tr>
-                <th></th>
-                <th>Story ID</th>
-                <th>Summary</th>
-                <th>Sprint</th>
-                <th>API Area</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr *ngFor="let story of stories" [class.selected]="selectedStory?.user_story_hierarchy_id === story.user_story_hierarchy_id">
-                <td>
-                  <input
-                    type="radio"
-                    name="story"
-                    [checked]="selectedStory?.user_story_hierarchy_id === story.user_story_hierarchy_id"
-                    (change)="selectStory(story)"
-                  />
-                </td>
-                <td>{{ story.user_story_id }}</td>
-                <td>{{ story.title }}</td>
-                <td>{{ story.sprint || '-' }}</td>
-                <td>{{ story.api_area || '-' }}</td>
-                <td>{{ story.status || '-' }}</td>
-              </tr>
-              <tr *ngIf="!stories.length">
-                <td colspan="6" class="empty-cell">No stories were provided by the host Test Generation page.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="section-block" *ngIf="selectedStory">
-        <div class="section-header">
-          <h2>Selected Story</h2>
-        </div>
-        <div class="story-summary">
-          <strong>{{ selectedStory.user_story_id }}</strong>
-          <span>{{ selectedStory.title }}</span>
-        </div>
-        <ul class="criteria-list">
-          <li *ngFor="let item of selectedStory.acceptance_criteria">{{ item }}</li>
-        </ul>
-      </section>
-
-      <section class="section-block">
-        <div class="section-header">
-          <h2>API Scenarios</h2>
-          <button type="button" [disabled]="!scenarioSelections.length || isGeneratingTests" (click)="generateSelectedTests()">
-            Generate Selected Tests
-          </button>
-        </div>
-
-        <div class="table-shell">
-          <table>
-            <thead>
-              <tr>
-                <th></th>
-                <th>Scenario</th>
-                <th>API / Service</th>
-                <th>Method</th>
-                <th>Endpoint</th>
-                <th>Type</th>
-                <th>Target</th>
-                <th>Priority</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr *ngFor="let selection of scenarioSelections">
-                <td>
-                  <input type="checkbox" [checked]="selection.selected" (change)="toggleScenario(selection)" />
-                </td>
-                <td>
-                  <strong>{{ selection.scenario.scenario_name }}</strong>
-                  <small>{{ selection.scenario.reason }}</small>
-                </td>
-                <td>{{ selection.scenario.service_name || '-' }}</td>
-                <td>{{ selection.scenario.method || '-' }}</td>
-                <td>{{ selection.scenario.endpoint || '-' }}</td>
-                <td>{{ selection.scenario.scenario_type }}</td>
-                <td>
-                  <select [(ngModel)]="selection.target">
-                    <option value="ci">CI</option>
-                    <option value="stage">Stage</option>
-                    <option value="both">Both</option>
-                  </select>
-                </td>
-                <td>{{ selection.scenario.priority }}</td>
-                <td>
-                  <button type="button" [disabled]="isGeneratingTests" (click)="generateOne(selection)">Generate</button>
-                </td>
-              </tr>
-              <tr *ngIf="!scenarioSelections.length">
-                <td colspan="9" class="empty-cell">Generate scenarios from a selected sprint story.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </main>
-
-    <aside class="side-column">
-      <section class="section-block status-panel">
-        <div class="section-header">
-          <h2>Generation Status</h2>
-          <button type="button" class="danger" [disabled]="!activeTaskId || activeJob?.status === 'completed'" (click)="abort()">
-            Abort
-          </button>
-        </div>
-
-        <div class="status-line" *ngIf="activeJob">
-          <span class="status-pill">{{ activeJob.status }}</span>
-          <span>{{ activeJob.stage }}</span>
-        </div>
-
-        <ol class="event-list">
-          <li *ngFor="let event of events">
-            <strong>{{ event.stage }}</strong>
-            <span>{{ event.message }}</span>
-          </li>
-          <li *ngIf="!events.length" class="empty-event">No active job.</li>
-        </ol>
-
-        <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
-      </section>
-
-      <section class="section-block" *ngIf="generatedResult">
-        <div class="section-header">
-          <h2>Generated Files</h2>
-        </div>
-        <ul class="file-list">
-          <li *ngFor="let file of generatedResult.generated_files">
-            <strong>{{ file.path }}</strong>
-            <span>{{ file.summary }}</span>
-          </li>
-        </ul>
-      </section>
-
-      <section class="section-block" *ngIf="generatedResult?.strategy_name">
-        <div class="section-header">
-          <h2>Strategy</h2>
-        </div>
-        <div class="strategy-summary">
-          <span>{{ generatedResult?.strategy_name }}</span>
-          <span>{{ generatedResult?.strategy_confidence || 'unknown' }}</span>
-        </div>
-        <ul class="compact-list">
-          <li *ngFor="let reason of generatedResult?.strategy_reasons || []">{{ reason }}</li>
-        </ul>
-      </section>
-
-      <section class="section-block" *ngIf="generatedResult?.mock_stub_plan">
-        <div class="section-header">
-          <h2>Mocks & Stubs</h2>
-        </div>
-        <p class="muted">Strategy: {{ generatedResult?.mock_stub_plan?.strategy || 'unknown' }}</p>
-        <ul class="compact-list">
-          <li *ngFor="let stub of generatedResult?.mock_stub_plan?.generated_stubs || []">{{ stub }}</li>
-        </ul>
-      </section>
-
-      <section class="section-block" *ngIf="generatedResult?.validation">
-        <div class="section-header">
-          <h2>Validation</h2>
-        </div>
-        <p [class.pass]="generatedResult?.validation?.passed" [class.fail]="!generatedResult?.validation?.passed">
-          {{ generatedResult?.validation?.summary }}
-        </p>
-        <p class="muted" *ngIf="generatedResult?.validation?.command">
-          {{ generatedResult?.validation?.command }}
-        </p>
-      </section>
-    </aside>
-  </div>
 </section>

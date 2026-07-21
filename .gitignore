@@ -35,11 +35,13 @@ __pycache__/
 .coverage
 .coverage.*
 htmlcov/
+*.egg-info/
 .venv/
 venv/
 env/
 
 # Test and build output
+# Test, preview, and build output
 coverage/
 test-results/
 playwright-report/
@@ -49,6 +51,10 @@ out/
 .cache/
 
 # Runtime and temporary files
+combined-preview-*/
+
+# Runtime and temporary files
+.agent-state/
 *.log
 *.tmp
 *.temp

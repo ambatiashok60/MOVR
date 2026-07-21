@@ -55,7 +55,7 @@ The current implementation includes:
 - Playwright validation for test discovery and duplicate titles within spec
   files.
 - Validation placeholders for syntax checks and repo command validation.
-- Shared logging metadata helper at `app/utils/logging_utils.py`.
+- Direct Worktop custom-logger imports across logging application modules.
 - Repository support classification for beta-fit, warning-fit, and unsupported
   repositories.
 
@@ -140,7 +140,7 @@ runtime, or validation support:
 - Selenium, WebDriver, Java, Python, C#, Ruby, or non-TypeScript test repos.
 - Playwright repos using a custom internal DSL instead of recognizable
   Playwright APIs.
-- Complex Nx, Turborepo, Bazel, or polyrepo setups with ambiguous app/test
+- Complex Nx, Turborepo, Bazel, or polyrepo setups with ambiguous worktop/test_agent/app/test
   ownership.
 - Repositories with many Playwright configs and no clear target app.
 - Microfrontend repositories where routes and screens are assembled dynamically.
@@ -158,6 +158,11 @@ single-app frontend repos and simple monorepos, where Playwright config,
 package scripts, source files, existing specs, fixtures, helpers, and page
 objects are locally available and statically inspectable.
 
+Beta also supports bootstrap mode: an Angular/React TypeScript UI repository
+with NO E2E framework at all is not rejected — the Playwright framework
+(config, dependency, e2e/ convention, fixtures entry point, and the first
+spec) is scaffolded during generation, governed by Playwright best practices.
+
 Beta does not target Cypress/Selenium repos, non-TypeScript Playwright repos,
 highly custom test DSLs, complex build-system monorepos, or repositories
 requiring remote infrastructure/secrets for basic validation.
@@ -169,6 +174,12 @@ requiring remote infrastructure/secrets for basic validation.
 The generated `RepoProfile` includes:
 
 - `support_status`: `supported`, `supported_with_warnings`, or `unsupported`.
+- `requires_bootstrap`: true when the repo is a qualifying Angular/React
+  TypeScript UI app with no Playwright framework yet — generation scaffolds the
+  framework instead of rejecting the repo. Missing config/specs are only
+  blockers when the repo does not qualify for bootstrap (no package.json, no
+  beta framework signal, or a competing test framework like Cypress/Selenium).
+  A repo with a Playwright config but no specs yet is a warning, not a blocker.
 - `support_reasons`: concrete signals that make the repo a beta fit.
 - `support_warnings`: risks that may require additional ownership logic.
 - `support_blockers`: reasons the repo cannot run through beta generation.
@@ -227,6 +238,8 @@ Response model:
   "files_changed": [],
   "diff_summary": "0 patch(es) generated",
   "confidence": 0.0,
+  "needs_review": false,
+  "review_reasons": [],
   "decision_trace": [],
   "validation": {
     "passed": true,
@@ -290,13 +303,20 @@ Candidate Test Ranking Agent
    ↓
 Extend / Append / Create Decision Agent
    ↓
-Flow Stability / Flow Merge Agent
+Reconcile + Confidence Gate (deterministic)
+   ↓
+Existing-Test Context (extend) / Anchor Flow Context (append)
+   ↓
+Flow Stability / Flow Merge Agent (extend, grounded in existing test)
    ↓
 Ownership Resolution Agent
    ↓
 Locator and Functionality Justification Agent
    ↓
 Code Generation Agent
+   ↓
+Patch Plan Guard (extension target, preserved steps, append reuse,
+                  reference integrity, ownership emission, created-spec structure)
    ↓
 Scoped Patch Writer
    ↓
@@ -308,9 +328,325 @@ Final Response
 ```
 
 The current scaffold wires these stages through
-`app/services/generation_orchestrator.py`. Some stages are implemented as
-deterministic placeholders so the system shape is stable before connecting the
-real LLM adapter and parser implementations.
+`worktop/test_agent/app/services/generation_orchestrator.py`. A few stages remain deterministic
+placeholders so the system shape is stable before connecting the remaining parser
+implementations, but the decision stages themselves are now fully wired (see
+[Decision Intelligence Hardening](#decision-intelligence-hardening)).
+
+## Decision Intelligence Hardening
+
+The first iteration wired the stages together but left several of the placement
+and test-action decisions loosely enforced. This section documents what changed,
+why, and how the new design differs from the original.
+
+### What the old design did
+
+- **Two decisions gated output**: spec placement (`create_new` + target file) and
+  the extend/append/create test action. Both were produced by the LLM.
+- **Decisions were stringly-typed**: `TestActionDecision.action` was a bare `str`,
+  so an out-of-vocabulary action from the model was never rejected at parse time.
+- **No confidence gating**: a `0.30` decision flowed into code generation exactly
+  like a `0.95` decision. Confidence was logged but never changed behavior.
+- **No placement/action reconciliation**: nothing checked that `create_new=false`
+  disagreed with an `action` of `create_new_spec`.
+- **Candidate ranking was a no-op**: `CandidateTestRankingAgent.rank()` returned
+  the candidates in raw inventory order, so `target_test_title` selection and the
+  fallback had no evidence-based ordering.
+- **Flow merge and ownership resolution were advisory only**: both agents ran, but
+  their results were logged and thrown away — they never reached the code
+  generation prompt. There was therefore no real "which page object owns this?"
+  decision and no "preserve the stable flow, add only the missing steps" signal.
+- **The only strongly enforced standard** was the `extend_existing_test` patch
+  guard, which requires an exact replace on the selected test block.
+
+### What the new design does
+
+The decision stages are now typed contracts with deterministic guardrails around
+the LLM, an evidence-based ranking pass, and the previously discarded advisory
+agents wired directly into code generation.
+
+```text
+Spec Placement Agent            LLM decision (typed, confidence-bounded)
+   ↓
+Candidate Test Ranking Agent    LLM ranks candidates by behavioral overlap
+   ↓
+Extend / Append / Create Agent  LLM decision (Literal action, confidence-bounded)
+   ↓
+Reconcile action ↔ placement    Deterministic: action must match the target file
+   ↓
+Confidence gate                 Deterministic: low confidence → safe fallback + flag
+   ↓
+Existing-test context + guard   Deterministic: extend must target the exact block
+   ↓
+Flow Merge + Ownership + Locators  Fed into code generation (no longer discarded)
+   ↓
+Code Generation Agent
+   ↓
+Patch Plan Guard                Reference integrity, ownership emission,
+                                created-spec structure, append reuse,
+                                extension target + preserved steps
+```
+
+#### 1. Typed decision contracts
+
+- `TestActionDecision.action` is now `Literal["extend_existing_test",
+  "append_new_test", "create_new_spec"]`, backed by shared `TestActions`
+  constants. An invalid action fails Pydantic validation, which routes the stage
+  to its deterministic fallback instead of flowing downstream.
+- Confidence on `TestActionDecision`, `SpecPlacementDecision`, and
+  `OwnershipResolution` is bounded to `[0, 1]`.
+
+#### 2. Placement ↔ action reconciliation
+
+Placement is the authority on the target file, so the action is coerced to be
+consistent with it:
+
+- `create_new = true` → the only consistent action is `create_new_spec`.
+- `create_new = false` → `create_new_spec` is contradictory and is downgraded to a
+  safe `append_new_test` into the placement-owned spec.
+
+Implemented in `_reconcile_action_with_placement` in the orchestrator.
+
+#### 3. Confidence gating (safe fallback + review flag)
+
+New settings `min_placement_confidence`, `min_action_confidence`, and
+`min_ownership_confidence` (default `0.5`) gate the decisions:
+
+- Below threshold, the only destructive action (`extend_existing_test`, which
+  rewrites a proven test block) is downgraded to `append_new_test`. Additive
+  actions are kept but flagged.
+- Every low-confidence decision adds a reason to `GenerationResult.review_reasons`
+  and sets `GenerationResult.needs_review = true`. Generation still completes; the
+  result is simply marked for review.
+
+Because deterministic fallbacks carry `confidence = 0.35` (below the default
+threshold), any fallback-path decision now flags for review by design. Lower the
+relevant threshold if fallback extensions should survive.
+
+#### 4. Real candidate ranking
+
+`CandidateTestRankingAgent` is now an LLM structured-output agent that ranks
+existing tests by behavioral overlap with the `FunctionalIntent` (shared route,
+screen, journey, assertions, fixtures, page objects), returning a
+`CandidateRanking`. It falls back to deterministic passthrough (original order)
+when there is no intent, no LLM client, one-or-fewer candidates, or on any error.
+
+#### 5. Flow merge and ownership wired into generation
+
+Both agents moved off the discard-only advisory path onto a resilient
+`_run_optional_stage` (returns `None` on failure, never aborts generation) and are
+now passed into the code generation prompt:
+
+- The **flow merge plan** tells the generator to keep `stable_region` /
+  `preserved_steps` intact and add only `extension_region` / `added_steps`.
+- The **ownership resolution** tells the generator to place new locators, helpers,
+  and methods in the resolved owner (`owner_path` / `owner_kind`) rather than
+  inlining them in the spec.
+
+#### 6. Ownership is a first-class decision
+
+`OwnershipResolution` gained `create_new`, a bounded confidence, and a full
+`DecisionTrace`. The prompt now carries reuse-vs-create-page-object standards, the
+deterministic fallback reuses an existing owner (never invents one) with a trace,
+and low-confidence ownership is flagged for review.
+
+### Flow-reuse grounding (append and extend)
+
+The first hardening pass wired flow-merge and ownership into generation, but the
+proven-flow signal was still weak: flow merge was derived from the intent rather
+than the real test, appended tests received no sibling flow at all, and nothing
+verified that proven steps survived. This pass grounds and verifies flow reuse.
+
+#### Append: anchor flow context
+
+`append_new_test` previously received no existing flow, so a new test could
+reinvent a parallel setup. The orchestrator now resolves an **`AnchorFlowContext`**
+— the sibling test in the target spec with the richest reusable setup (most page
+objects + fixtures) — and passes it into code generation as a reference (never an
+edit target), with a rationale recording why it was chosen. The prompt instructs
+the generator to reuse the anchor's setup/auth/navigation/fixtures/page objects
+and add only the new steps. A deterministic guard (`_append_reuse_check`) then
+requires the appended test to reuse at least one of the anchor's page objects or
+non-generic fixtures; otherwise it routes to repair rather than shipping a
+reinvented flow.
+
+#### Extend: grounded flow merge + preservation guard
+
+`flow_merge.plan(...)` now receives the `ExistingTestContext`, so
+`stable_region` / `preserved_steps` come from the actual test source instead of
+the intent, and it runs only for `extend_existing_test`. `FlowMergePlan` gained a
+bounded confidence and a `DecisionTrace`, and low-confidence merges are flagged
+for review. The extension guard now also runs `_dropped_preserved_steps`: any
+step the flow plan lists as preserved that actually exists in the original test
+source must survive in the replacement, closing the silent step-drop risk.
+Paraphrased or invented steps never trigger a false failure because only steps
+literally present in the source are enforced.
+
+### Reference integrity and reuse verification
+
+Execution is intentionally out of scope for now; the goal of this pass is that
+generated code is high quality on the first write — real locators, real page
+object members, real imports — so post-generation edits stay minimal.
+
+#### Locator decisions reach the generator
+
+`LocatorReasoningAgent` (evidence-grounded `LocatorDecisionSet` from source
+intelligence) was previously advisory-discarded. It now runs as an optional
+stage and its decisions are rendered into the code generation prompt with a hard
+rule: use exactly those locators for the matching interactions, never invent
+alternatives without source evidence.
+
+#### Reference-integrity guard (deterministic)
+
+A new patch-plan check fails generation (and routes to repair) when generated
+code provably references things that don't exist:
+
+- every **relative import** must resolve to a repository file or to another
+  patch in the same set;
+- every **page-object member call** (`const po = new PlanPage(...)` then
+  `po.method()`) must exist in the class source, resolved through the patch's
+  own import — an invented `planPage.openDesigner()` no longer survives.
+
+The check is conservative by design: tsconfig-alias imports, inherited classes
+(`extends`), and anything unresolvable are skipped, never failed — it only
+rejects provably invented references.
+
+#### Ownership grounded in needed locators + emission guard
+
+Ownership resolution now receives the functional intent and source intelligence
+(the locators/components the change actually needs), so reuse-vs-create is
+decided against the real requirement instead of inventory alone. A deterministic
+emission guard then enforces the promise: if ownership says `create_new` for a
+page object/helper/fixture, the patch set must contain a patch creating
+`owner_path` — locators can no longer be silently inlined into the spec.
+
+#### Create-spec grounding: template anchor + best-practices standard
+
+`create_new_spec` previously generated from repo-wide context only. Now:
+
+- the richest existing test anywhere in the repository is selected as a
+  **template anchor** (style/setup reference only — its titles and assertions
+  are never copied);
+- a **Playwright best-practices scaffold** is injected into the prompt for every
+  create: getByRole-first locator priority, web-first assertions, no fixed
+  waits, storageState/beforeEach auth, `test.step` structure, parallel-safe
+  isolation. When the repository has nothing to reuse (greenfield), this is the
+  governing standard; when repo conventions exist, they win;
+- a structural guard requires every created spec to import `@playwright/test`
+  and contain a `test` block with `expect` assertions.
+
+### Framework bootstrap for repos with no E2E setup
+
+The service has access to the full UI application repository, and the E2E
+framework may or may not exist there yet. Previously a repo with no Playwright
+at all was hard-rejected (422 unsupported). Bootstrap mode closes that:
+
+- **Classification** — a qualifying UI repo (package.json + Angular/React +
+  TypeScript, no competing test framework) with no Playwright config/specs gets
+  `requires_bootstrap=true` instead of blockers.
+- **Deterministic scaffold** — `BootstrapScaffoldService` emits the framework
+  from templates, not the LLM: `playwright.config.ts` (testDir `./e2e`, CI
+  retries, trace/screenshot policy, `webServer` derived from the repo's
+  start/dev script), a `package.json` merge adding the `@playwright/test`
+  devDependency and `test:e2e` script, and an `e2e/fixtures.ts` entry point.
+  Only the spec itself is LLM-generated, under the best-practices standard.
+- **Placement normalization** — in bootstrap mode the spec placement is steered
+  onto the scaffolded `e2e/` convention deterministically.
+- **Scaffold guard** — `_bootstrap_scaffold_check` ensures the config and
+  dependency patches survive critic review and repair; on collision the
+  deterministic scaffold wins over LLM-generated duplicates.
+
+### Prompt hardening (contract quality and context discipline)
+
+The Pydantic layer guarantees bad output cannot ship; prompt hardening reduces
+how often the repair loop and low-confidence fallbacks fire in the first place:
+
+- **Real examples for every structured model.** `CandidateRanking`,
+  `OwnershipResolution`, `FlowMergePlan`, `LocatorDecisionSet`, and
+  `SourceIntelligence` previously fell through to a generic fallback that showed
+  an empty object as the "valid example" — actively teaching the model to fail
+  validation. Each now has a canonical valid/invalid pair, and unknown models get
+  schema-only guidance instead of a fabricated example.
+- **Action-labeled PatchSet few-shots.** The patch contract now shows all three
+  shapes the guards accept: `create_new_spec`, `append_new_test` (anchor-reusing
+  append), and `extend_existing_test` (exact-range replace preserving the title
+  and proven steps).
+- **Context curation.** Prompts no longer dump raw payloads: repository
+  inventory is stripped of per-file hashes and capped (E2E candidates kept
+  first), every UI-context evidence list is capped, and candidate tests are
+  capped to the top 25 with truncated excerpts. The extend target's
+  `ExistingTestContext` excerpt is deliberately never truncated — it is the
+  replace source.
+- **DecisionTrace quality floor.** A placement/action trace with no decision,
+  justification, or evidence validates structurally but is unreviewable; it now
+  adds a `review_reasons` entry (non-blocking).
+
+### Agentic exploration (Claude Code / Codex style, fully self-contained)
+
+Spec placement, extend/append/create, and code generation are no longer static
+one-shot calls: each runs a bounded exploration loop (own `RepoExplorer` +
+`complete_with_exploration`, zero code shared with api-agent). The model must
+state `reasoning` every turn and a `reason` for every file it requests before
+reading candidate specs, actual test blocks, or page objects — all logged, so
+the decision trail is reconstructable at every level. Running the
+generated Playwright tests is intentionally out of scope for now: validation is
+static (discovery, structure, quality heuristics) and the repair loop converges
+on those signals.
+
+### Old vs new at a glance
+
+```text
+Concern                     Old                         New
+--------------------------  --------------------------  ----------------------------
+Action type                 bare string                 Literal enum -> fallback
+Confidence                  logged, unused              gated -> safe fallback + flag
+Placement vs action         unchecked                   reconciled deterministically
+Candidate ranking           no-op passthrough           LLM overlap ranking
+Flow merge / ownership      advisory, discarded         wired into code generation
+Ownership decision          owner path only             create_new + DecisionTrace
+Review signal               none                        needs_review + review_reasons
+Flow merge source           functional intent           grounded in existing test
+Append flow reuse           none (reinvented)           anchor context + reuse guard
+Extend step preservation    prompt-only                 deterministic guard
+Locator decisions           advisory, discarded         fed into code generation
+Invented references         undetected                  reference-integrity guard
+Ownership inputs            inventory only              intent + source evidence
+Owner creation promise      unenforced                  emission guard
+Create-spec grounding       repo-wide context only      template anchor + best practices
+No-framework repos          rejected (422)              bootstrap scaffold + guard
+Schema examples             4 models, {} fallback       all models, no fabricated example
+Prompt payloads             raw dumps (incl. hashes)    curated + capped context
+Trace quality               structural only             shallow traces flagged
+```
+
+### Where these live
+
+```text
+worktop/test_agent/app/schemas/test_action_decision.py     Literal action + TestActions constants
+worktop/test_agent/app/schemas/spec_placement.py           bounded confidence + labels
+worktop/test_agent/app/schemas/candidate_ranking.py        ranking schema (new)
+worktop/test_agent/app/schemas/behavioral_test_unit.py     ExistingTestContext + AnchorFlowContext
+worktop/test_agent/app/schemas/flow_merge.py               confidence + DecisionTrace
+worktop/test_agent/app/schemas/ownership_resolution.py     create_new + DecisionTrace
+worktop/test_agent/app/schemas/generation_result.py        needs_review + review_reasons
+worktop/test_agent/app/prompts/candidate_ranking_prompt.py ranking prompt (new)
+worktop/test_agent/app/prompts/flow_merge_prompt.py        grounded in existing test source
+worktop/test_agent/app/prompts/code_generation_prompt.py   anchor/flow/ownership/locator reuse rules
+worktop/test_agent/app/prompts/prompt_sections.py          best-practices scaffold, per-model
+                                        examples, context curation helpers
+worktop/test_agent/app/prompts/ownership_resolution_prompt.py  needed-locators grounding
+worktop/test_agent/app/agents/candidate_test_ranking_agent.py  real LLM ranking + fallback
+worktop/test_agent/app/services/generation_orchestrator.py reconcile, gates, optional stages,
+                                        anchor flow, bootstrap wiring,
+                                        patch-plan guards (extension, append
+                                        reuse, reference integrity, ownership
+                                        emission, created-spec structure,
+                                        bootstrap scaffold)
+worktop/test_agent/app/services/repo_strategy_service.py   bootstrap classification
+worktop/test_agent/app/services/bootstrap_scaffold_service.py  deterministic framework scaffold (new)
+worktop/test_agent/app/schemas/repo_profile.py             requires_bootstrap flag
+worktop/test_agent/app/config.py                           min_*_confidence thresholds
+```
 
 ## Architecture
 
@@ -319,7 +655,7 @@ real LLM adapter and parser implementations.
 Located in:
 
 ```text
-app/api/routes/
+worktop/test_agent/app/api/routes/
 ```
 
 Responsibilities:
@@ -337,7 +673,7 @@ orchestrator.
 Located in:
 
 ```text
-app/services/generation_orchestrator.py
+worktop/test_agent/app/services/generation_orchestrator.py
 ```
 
 Responsibilities:
@@ -356,7 +692,7 @@ belongs in agents, services, tools, patching, or validation modules.
 Located in:
 
 ```text
-app/services/
+worktop/test_agent/app/services/
 ```
 
 Responsibilities:
@@ -381,7 +717,7 @@ Services are the bridge between deterministic tools and agent decisions.
 Located in:
 
 ```text
-app/agents/
+worktop/test_agent/app/agents/
 ```
 
 Responsibilities:
@@ -400,7 +736,7 @@ Responsibilities:
 Every agent inherits from:
 
 ```text
-app/agents/base_agent.py
+worktop/test_agent/app/agents/base_agent.py
 ```
 
 The base class centralizes common logging behavior and the structured LLM call
@@ -412,7 +748,7 @@ provider SDKs directly.
 Located in:
 
 ```text
-app/tools/
+worktop/test_agent/app/tools/
 ```
 
 Responsibilities:
@@ -431,7 +767,7 @@ Tools are deterministic. They do not make semantic decisions.
 Located in:
 
 ```text
-app/inventory/
+worktop/test_agent/app/inventory/
 ```
 
 Responsibilities:
@@ -450,7 +786,7 @@ inventory is deterministic and based on Git, ASTs, file paths, and file hashes.
 Located in:
 
 ```text
-app/patching/
+worktop/test_agent/app/patching/
 ```
 
 Responsibilities:
@@ -468,7 +804,7 @@ structured patch intent; they do not overwrite arbitrary files.
 Located in:
 
 ```text
-app/validation/
+worktop/test_agent/app/validation/
 ```
 
 Responsibilities:
@@ -485,7 +821,7 @@ wire real package-manager commands and parser-based duplicate test checks.
 
 Agents must use the existing model abstraction instead of provider SDKs.
 
-Preferred shape:
+Required construction path:
 
 ```python
 self.llm = ModelClientFactory.get_client(
@@ -497,14 +833,11 @@ self.llm = ModelClientFactory.get_client(
 )
 ```
 
-Or, if using the existing wrapper:
-
-```python
-self.llm = DefaultLLMClient(
-    db=db,
-    tenant_id=tenant_id,
-)
-```
+`test-agent` deliberately does not instantiate Worktop's higher-level
+`DefaultLLMClient`. Mixing that wrapper contract with provider-level methods
+made ownership ambiguous. The adapter loads shared model parameters and tenant
+model configuration, validates `provider_name`, and passes all three to
+`ModelClientFactory.get_client(...)`.
 
 Agent usage:
 
@@ -518,16 +851,48 @@ decision = self.llm.complete_structured(
 Current implementation files:
 
 ```text
-app/llm/llm_client.py
-app/llm/default_llm_client.py
-app/llm/llm_client_factory.py
-app/runtime/generation_runtime.py
-app/prompts/
+worktop/test_agent/app/llm/llm_client.py
+worktop/test_agent/app/llm/default_llm_client.py
+worktop/test_agent/app/llm/llm_client_factory.py
+worktop/test_agent/app/runtime/generation_runtime.py
+worktop/test_agent/app/prompts/
 ```
 
 `GenerationRuntime` is created per request and carries the job, tenant,
 repository, branch, database handle, and LLM client. `LLMClientFactory` creates
-a `DefaultLLMClientAdapter` from the existing Worktop model stack.
+a `DefaultLLMClientAdapter`, which constructs the provider client directly
+through Worktop's `ModelClientFactory`.
+
+The host integration contract is:
+
+```text
+CommonUtils.load_model_info(db, tenant_id)
+  -> model_params
+ModelsConfigurationDAO(db).get_model_config_by_tenant_id(tenant_id)
+  -> model_config + provider_name
+ModelClientFactory.get_client(provider_name, model_config, model_params, db, tenant_id)
+  -> provider client
+provider client.prepare_input(...)
+provider client.generate_completion(...)
+```
+
+These external method signatures must be checked when integrating into a
+Worktop version that changes its core-services API; `test-agent` must not add a
+second wrapper fallback to hide such incompatibility.
+
+## Logging Integration
+
+All application modules import Worktop's logger directly:
+
+```python
+from worktop.core_services.app.utility.custom_logger.logging import logger
+```
+
+Worktop therefore remains responsible for production handlers, console output,
+and centralized sinks. `test-agent` must not call `logging.getLogger()` or
+configure handlers in individual application modules. Standalone tests install
+a test-only logger stub in `conftest.py`; production has a hard dependency on
+the Worktop custom-logger module.
 
 Because this is an agentic generation process, missing model configuration is a
 hard failure. If `tenant_id` is absent or the real client cannot be created, the
@@ -559,47 +924,19 @@ This preserves:
 
 ## Logging Design
 
-The scaffold reuses the existing custom logger package:
+Every logging application file imports only the Worktop logger:
 
 ```python
-from worktop.core_services.app.utility.custom_logger.log_helpers import (
-    log_card_simple,
-    log_exception,
-    log_metric,
-    log_step,
-)
-
-from worktop.core_services.app.utility.custom_logger.logging import (
-    log_performance,
-    logger,
-)
+from worktop.core_services.app.utility.custom_logger.logging import logger
 ```
 
-It does not create a new logger.
-
-Shared logging metadata is normalized by:
-
-```text
-app/utils/logging_utils.py
-```
-
-Supported metadata keys:
-
-```text
-job_id
-tenant_id
-repo_path
-branch
-stage
-agent_name
-```
-
-Standard patterns:
+There is no local logger creation, configuration, event wrapper, stage wrapper,
+metadata helper, or performance decorator. Context is supplied directly in
+normal logger messages:
 
 ```python
-log_step("repo_strategy_started", {"repo_path": repo_path})
-log_metric("candidate_tests_count", len(candidate_tests))
-logger.info("Generation job completed successfully")
+logger.info("job_id=%s stage=%s status=started", job_id, stage)
+logger.warning("job_id=%s stage=%s status=review_required", job_id, stage)
 ```
 
 Exception pattern:
@@ -608,16 +945,12 @@ Exception pattern:
 try:
     ...
 except Exception as exc:
-    log_exception(exc, context={"job_id": job_id, "stage": "spec_placement"})
+    logger.exception(
+        "job_id=%s stage=spec_placement status=failed error=%s",
+        job_id,
+        exc,
+    )
     raise
-```
-
-Performance pattern:
-
-```python
-@log_performance("repo_strategy_service.detect")
-def detect(...):
-    ...
 ```
 
 ## Decision Contract
@@ -649,7 +982,7 @@ Every agent decision should follow this structure:
 This is represented by:
 
 ```text
-app/schemas/decision_trace.py
+worktop/test_agent/app/schemas/decision_trace.py
 ```
 
 ## Write Rules
@@ -681,6 +1014,16 @@ The design explicitly rejects:
 - Writes without backup.
 - Duplicate test names.
 - Repair outside approved generated scope.
+- Out-of-vocabulary decision actions (enforced by `Literal` typing).
+- Placement and test action that disagree (reconciled deterministically).
+- Destructive `extend_existing_test` edits under low confidence (downgraded to
+  `append_new_test` and flagged for review).
+- Invented page-object members and unresolvable relative imports (reference-
+  integrity guard).
+- Promised new owners (page object/helper/fixture) that the patch set does not
+  actually create (ownership-emission guard).
+- Created spec files without Playwright structure (`@playwright/test` import,
+  `test` block, `expect` assertions).
 
 ## Repository Truth Model
 
@@ -728,7 +1071,7 @@ pip install -e .
 Run the service:
 
 ```bash
-uvicorn app.main:app --reload
+uvicorn worktop.test_agent.app.main:app --reload
 ```
 
 Run a sample request:
@@ -755,19 +1098,197 @@ python3 -m compileall -q test-agent
 ## File Map
 
 ```text
-app/main.py
-app/config.py
-app/api/routes/
-app/schemas/
-app/services/
-app/agents/
-app/tools/
-app/inventory/
-app/patching/
-app/validation/
-app/utils/
+worktop/test_agent/app/main.py
+worktop/test_agent/app/config.py
+worktop/test_agent/app/api/routes/
+worktop/test_agent/app/schemas/
+worktop/test_agent/app/services/
+worktop/test_agent/app/agents/
+worktop/test_agent/app/tools/
+worktop/test_agent/app/inventory/
+worktop/test_agent/app/patching/
+worktop/test_agent/app/validation/
+worktop/test_agent/app/utils/
 ```
 
 The architecture is intentionally modular so each workflow stage can be
 implemented and tested independently while preserving one consistent generation
 contract.
+
+## Enterprise Intelligence (Phase 2 — Gaps 25–36)
+
+Phase 1 made the generator technically correct, structurally safe, and
+explainable. Phase 2 layers the platform-value capabilities that make it
+enterprise-ready: trustworthy, measurable, governable, and extensible. None of
+these change *how* code is generated; they change what the platform can prove
+about every generation.
+
+### Coverage Preservation (Gap 25)
+
+The engine never assumes an extension preserved existing coverage — it proves
+it. A behavioral coverage graph (assertions, navigations, API touchpoints,
+interactions, data inputs per test) is built before generation from the
+behavioral inventory and again after patches land by re-parsing every patched
+spec. The diff is classified as preserved / added / removed / modified; removed
+or weakened behavior becomes a review reason and the full
+`CoveragePreservationReport` ships on the result.
+
+### Test Value Analysis (Gap 26)
+
+A generated test that compiles is not necessarily valuable. Every newly
+generated test is compared against the closest existing test by
+outcome-signal overlap and classified as `NEW_COVERAGE`,
+`MEANINGFUL_VARIATION`, `PARTIAL_DUPLICATE`, `FULL_DUPLICATE`, or `LOW_VALUE`.
+A `FULL_DUPLICATE` is never accepted silently — it requires approval (unless
+the repository policy explicitly tolerates duplicates), and assertion-free
+tests are flagged as low value.
+
+### Requirement Traceability (Gap 27)
+
+Every story step and expected assertion is mapped to the code that implements
+it — a generated patch or a reused existing flow — with evidence and a match
+score. Requirements that trace to nothing are reported `missing` and become
+review reasons, so "where is requirement 5 implemented?" is answerable
+directly from the `TraceabilityMatrix` on the result.
+
+### Human Review Intelligence (Gap 28)
+
+Instead of a bare diff, every run produces a `ReviewReport`: summary, files
+changed with reasons, flows reused and added, why the action and placement
+were chosen, methods created vs reused, locators reused, assertions added,
+validation outcome, and remaining risks — with a rendered markdown version.
+Goal: a five-minute review instead of a thirty-minute diff archaeology.
+
+### Repository Policy Engine (Gap 29)
+
+Different repositories have different rules. A policy file committed in the
+target repository (`.movr/test-agent-policy.yaml`, YAML or JSON — parsed even
+without a YAML dependency) declares them:
+
+```yaml
+generation:
+  allow_before_each_updates: false
+  assertion_location: spec        # spec | page_object | any
+  locator_owner: page_object      # page_object | spec | any
+  require_describe: true
+  rollback_failed_patch: false     # retain the final failed attempt for debugging
+  allow_full_duplicates: false
+```
+
+Policy checks join the patch-plan guard, so violations route through the
+repair loop like any other structural failure. Exhausted failures are retained
+by default for inspection; set `rollback_failed_patch: true` when a production
+workflow requires a clean tree.
+
+### Deterministic Generation (Gap 30)
+
+Every run freezes its inputs into a `GenerationManifest`: repository snapshot
+digest and head, content-hashed prompt versions (a prompt edit changes the
+recorded version automatically), model provider, generation settings, policy
+snapshot, stage decisions with confidence, and patch digests — plus an
+overall fingerprint so identical inputs are provably identical and divergent
+outputs can be explained input-by-input.
+
+### Regression Benchmark Suite (Gap 31)
+
+Golden scenarios in `benchmarks/golden_scenarios.json` (append, extend,
+create-spec, patch repair) run through the generator and are scored:
+append/extend/create accuracy, decision accuracy, reuse rate, patch success,
+repair success, validation pass rate, latency. `BenchmarkRunner.
+detect_regressions` compares reports so a prompt change that improves one
+behavior and silently regresses another is caught by numbers.
+
+### Cost & Latency Governance (Gap 32)
+
+Each run gets a `GenerationBudget` with hard ceilings (configurable via
+settings): max LLM calls, tool calls, repository reads, prompt volume, and
+wall-clock time. All agents run through a budget-charging LLM client wrapper;
+exploration loops charge repository reads; repair loops charge attempts.
+Exceeding any ceiling raises an explicit escalation instead of continuing
+forever, and the usage report ships on every successful result.
+
+### Workspace Isolation (Gap 33)
+
+Every job acquires a per-repository lock and an isolated workspace with a
+patch journal, rollback journal, and pre-patch snapshots of every file it
+touches. Two jobs on the same repository can never interleave writes or
+validate each other's files; stale locks from dead jobs are reclaimed after a
+timeout.
+
+### Idempotency (Gap 34)
+
+Generations are fingerprinted from the repository version (head + file
+hashes) plus the story name and steps. A repeated Generate against an
+unchanged repository returns "equivalent patch already generated" with a
+pointer to the original job instead of appending an identical test again.
+
+### Repository Security & Data Governance (Gap 35)
+
+Files are classified safe / internal / sensitive / restricted before anything
+reaches an LLM. Restricted material (env files, key material, credential
+stores) is never released in any form; everything else is scrubbed of secrets
+(passwords, API keys, cloud/GitHub/Slack tokens, JWTs, private key blocks).
+The model-directed exploration path enforces this on reads and search
+snippets, and an audit records files sent, files blocked, prompt volume, and
+redaction counts.
+
+### Technology-Agnostic Architecture (Gap 36)
+
+Core intelligence (flow reasoning, decisions, patch loops, validation/repair,
+coverage, reporting) is separated from the technology layer behind a
+`TechnologyAdapter` interface: `analyze_repository`, `classify_test_files`,
+`build_inventory`, `build_flow_inventory`, `apply_patch`, `rollback`,
+`validate`. `PlaywrightAdapter` implements it with the existing services; an
+`AdapterRegistry` resolves the configured technology. Supporting REST
+Assured, GraphQL, or gRPC later means writing an adapter — not duplicating
+the orchestration.
+
+### Logging Standardization & Workflow Observability (Gap 37)
+
+Logging uses the Worktop logger directly across the whole framework:
+
+```python
+from worktop.core_services.app.utility.custom_logger.logging import logger
+```
+
+This is the only supported pattern—no `print()`, local logger initialization,
+configuration module, or intermediary logging helpers (all enforced by
+`tests/test_logging_standard.py`, which scans the package source). Levels are
+used consistently: DEBUG for internals (prompt construction, model response
+parsing, tool output), INFO for workflow progress and decisions, WARNING for
+recoverable issues (structured-response repair, fallbacks), ERROR for stage
+failures, and `logger.exception` for unexpected exceptions. Prompts and raw
+LLM responses never appear above DEBUG.
+
+Orchestrator stages call `logger.info`, `logger.warning`, `logger.error`, or
+`logger.exception` directly and include job, stage, status, and relevant
+details in the message.
+
+```
+============================================================
+Repository Analysis
+============================================================
+
+Starting repository analysis...
+job_id: job-42
+
+Summary
+-------
+support_status: supported
+
+Repository Analysis completed in 2.31 seconds.
+```
+
+Failures render as `<Stage> FAILED after N seconds: <error>`; optional and
+advisory stages log that generation continues without them. The whole run
+opens with a generation banner and closes with a Generation Summary (files
+changed, review status, validation outcome, total duration).
+
+All imports are rooted at `worktop.test_agent` (matching the wider worktop
+platform layout, e.g. `worktop.core_services.app...`); the service package
+lives at `worktop/test_agent/app` and the shared logging utility at
+`worktop/test_agent/utils/logging.py`.
+# Documentation
+
+- [`FUNCTIONAL_GUIDE.md`](FUNCTIONAL_GUIDE.md) — product behavior and end-to-end generation flow.
+- [`TECHNICAL_ARCHITECTURE.md`](TECHNICAL_ARCHITECTURE.md) — backend architecture, contracts and wiring.

@@ -12,7 +12,7 @@ import { DiffViewerComponent } from '../diff-viewer/diff-viewer.component';
 
 export interface FileDecisionEvent {
   fileId: string;
-  decision: ReviewDecision;
+  decision: Extract<ReviewDecision, 'kept' | 'rejected'>;
 }
 
 @Component({
